@@ -4,7 +4,9 @@
 # version bump) to have the upstream reference available locally.
 set -euo pipefail
 
-BASE="https://raw.githubusercontent.com/jdx/mise/main/docs"
+# Pin MISE_DOCS_REF to the tag matching your installed mise (e.g. v2026.7.7)
+# when you want the docs to describe exactly the behavior you verified against.
+BASE="https://raw.githubusercontent.com/jdx/mise/${MISE_DOCS_REF:-main}/docs"
 DEST="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/upstream"
 
 FILES=(

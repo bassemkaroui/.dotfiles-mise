@@ -20,10 +20,12 @@ git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise
 2. Resolves a GitHub token (`$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` → `$GH_TOKEN` →
    `gh auth token`) and exports it — required because installing `[tools]` hits the GitHub
    releases API, which rate-limits unauthenticated callers to 60 req/hr.
-3. Backs up `~/.config/mise` (if it's a real dir) and symlinks it → `~/.dotfiles-mise/mise`.
+3. Backs up any existing `~/.config/mise` (real dir or foreign symlink) and symlinks it →
+   `~/.dotfiles-mise/mise`.
 4. Seeds the per-machine `mise/miserc.toml` (profile selection) from
    `mise/miserc.example.toml` — pass `DOTFILES_PROFILES=graphical,ai,dev` or answer the prompt.
-5. `mise trust` + `mise bootstrap --yes`.
+5. `mise trust`, moves conflicting real dotfile targets aside to `<file>.pre-mise.bak`
+   (e.g. the stock `~/.bashrc` on a fresh account), then `mise bootstrap --yes`.
 
 Re-running any of it is safe — everything converges.
 
@@ -60,7 +62,7 @@ mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
 mise bootstrap repos status      # cloned-repo drift
-python3 scripts/lint-config.py   # config collision lint (also in CI)
+python3 scripts/lint-config.py   # config collision lint (CI wiring comes in Phase 5)
 sandbox/mkhome.sh                # run bootstrap checks against a throwaway $HOME
 ```
 

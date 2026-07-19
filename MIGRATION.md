@@ -51,13 +51,22 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 ## Cutover checklist (per machine — manual, run by a human)
 
 1. `cd ~/.dotfiles && git pull` — make sure the old repo is current, commit any local changes.
-2. Back up: `tar czf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk} ~/.gnupg/gpg-agent.conf 2>/dev/null`
+2. Back up (`-h` dereferences the stow symlinks so the archive stores real content, not
+   dangling links):
+   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk} ~/.gnupg/gpg-agent.conf 2>/dev/null`
 3. Unstow everything with the OLD repo (restores its `.bak` backups):
    for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
    `.device-tag`). The `mise` package last.
 4. `git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise`
 5. `DOTFILES_PROFILES=<your profiles> ~/.dotfiles-mise/install.sh`
-6. Verify: `mise bootstrap status --missing` exits 0; open a new shell; run `mise doctor`.
-7. Wire the custom repo (Phase 6 docs) and re-run `mise bootstrap --yes`.
-8. Old state files (`.device-tag` etc.) stay in the old clone; the old repo remains usable as
+   — install.sh moves any conflicting real files (restored stow backups, skel rc files) aside
+   to `<file>.pre-mise.bak` before applying; it never uses `--force-dotfiles`.
+6. Recreate this machine's local overlays — the old repo carried some machine-specific lines
+   in committed files; they now belong in gitignored local files:
+   - `~/.zshrc.local`: extra PATH entries (`/usr/share/code/bin`, `/usr/local/go/bin`),
+     vagrant completion fpath, java stanzas, work tooling.
+   - `~/.zshenv.local` / `~/.bashrc.local`: anything else machine-specific.
+7. Verify: `mise bootstrap status --missing` exits 0; open a new shell; run `mise doctor`.
+8. Wire the custom repo (Phase 6 docs) and re-run `mise bootstrap --yes`.
+9. Old state files (`.device-tag` etc.) stay in the old clone; the old repo remains usable as
    an archive (gpg backups history, etc.). Do not delete it until comfortable.

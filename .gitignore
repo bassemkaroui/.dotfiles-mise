@@ -1,5 +1,7 @@
 # ── Per-machine state (lives inside mise/ because ~/.config/mise symlinks there) ──
-/mise/miserc.toml
+/mise/miserc.toml*
+/mise/config.local.toml
+/mise/config.*.local.toml
 /mise/conf.d/*
 !/mise/conf.d/.gitkeep
 

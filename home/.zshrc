@@ -64,6 +64,11 @@ export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(git fzf-tab zsh-autosuggestions zsh-syntax-highlighting sudo command-not-found aws)
 [[ -f "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
+# When oh-my-zsh is absent (bare bootstrap, repos not applied yet) the compdef
+# and hook helpers it normally provides don't exist — provide the minimum so
+# the guarded stanzas below never error.
+(( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }
+autoload -Uz add-zsh-hook
 
 # ── Cache helper ──
 # Caches eval output to ~/.cache/zsh/, regenerates in background if stale (>24h)

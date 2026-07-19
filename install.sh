@@ -13,6 +13,11 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NONINTERACTIVE="${DOTFILES_NONINTERACTIVE:-0}"
+# No usable stdin (curl | bash, CI) == non-interactive: `read` would EOF-exit
+# the script mid-prompt under set -e.
+[[ -t 0 ]] || NONINTERACTIVE=1
+
+KNOWN_PROFILES=(graphical gnome cosmic ai dev yazi neovim media veracrypt laptop desktop)
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
@@ -29,6 +34,17 @@ export PATH="$HOME/.local/bin:$PATH"
 # Installing [tools] resolves aqua/github-backed tools through the GitHub
 # releases API (60 req/hr unauthenticated). The token must be exported HERE —
 # in the parent process of `mise bootstrap` — hooks and tasks run too late.
+gh_cmd() {
+    # Run gh even before [tools] are installed: fall back to a one-off
+    # mise-managed gh (single API call, fits the unauthenticated budget).
+    if command -v gh &>/dev/null; then
+        gh "$@"
+    else
+        mkdir -p "${GH_CONFIG_DIR:-$HOME/.config/gh}" # gh errors without it
+        mise exec gh@latest -- gh "$@"
+    fi
+}
+
 if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         export MISE_GITHUB_TOKEN="$GITHUB_TOKEN"
@@ -46,17 +62,15 @@ if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
     else
         warn "No GitHub token found. Tool installs hit the GitHub API and will"
         warn "be rate-limited without one (60 req/hr)."
-        if command -v gh &>/dev/null; then
-            read -rp "Run 'gh auth login' now? [Y/n] " a
-            if [[ ! "$a" =~ ^[Nn]$ ]]; then
-                gh auth login
-                MISE_GITHUB_TOKEN="$(gh auth token)"
-                export MISE_GITHUB_TOKEN
-            fi
+        read -rp "Authenticate with GitHub now (gh auth login)? [Y/n] " a || a=n
+        if [[ ! "$a" =~ ^[Nn]$ ]]; then
+            gh_cmd auth login
+            MISE_GITHUB_TOKEN="$(gh_cmd auth token)"
+            export MISE_GITHUB_TOKEN
         else
-            warn "Install gh or export GITHUB_TOKEN=ghp_... then re-run this script."
-            read -rp "Continue anyway (best effort)? [y/N] " a
-            [[ "$a" =~ ^[Yy]$ ]] || exit 1
+            warn "Continuing without a token (best effort). If installs fail,"
+            warn "export GITHUB_TOKEN=ghp_... (https://github.com/settings/tokens,"
+            warn "no scopes needed) and re-run this script."
         fi
     fi
 else
@@ -65,10 +79,12 @@ fi
 
 # ── 3. ~/.config/mise → repo symlink ──────────────────────────────────────────
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
-if [[ -L "$CONF" && "$(readlink -f "$CONF")" == "$REPO/mise" ]]; then
+if [[ -L "$CONF" && "$(readlink -f "$CONF")" == "$(readlink -f "$REPO/mise")" ]]; then
+    # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
     ok "~/.config/mise already points at the repo"
 else
-    if [[ -e "$CONF" ]]; then
+    # -L catches broken/foreign symlinks that -e alone would miss
+    if [[ -e "$CONF" || -L "$CONF" ]]; then
         BAK="$CONF.bak.$(date +%Y%m%d%H%M%S)"
         warn "Backing up existing $CONF -> $BAK"
         mv "$CONF" "$BAK"
@@ -85,28 +101,32 @@ if [[ -f "$MISERC" ]]; then
 else
     PROFILES="${DOTFILES_PROFILES:-}"
     if [[ -z "$PROFILES" && "$NONINTERACTIVE" != "1" ]]; then
-        echo "Available profiles: graphical gnome cosmic ai dev yazi neovim media veracrypt laptop desktop"
-        read -rp "Profiles for this machine (comma-separated, empty = core only): " PROFILES
+        echo "Available profiles: ${KNOWN_PROFILES[*]}"
+        read -rp "Profiles for this machine (comma/space-separated, empty = core only): " PROFILES || PROFILES=""
     fi
+    selected=()
+    # split on commas and/or whitespace
+    for p in ${PROFILES//,/ }; do
+        if [[ " ${KNOWN_PROFILES[*]} " == *" $p "* ]]; then
+            selected+=("$p")
+        else
+            warn "Unknown profile '$p' — skipping (no config.$p.toml exists; mise would silently ignore it)"
+        fi
+    done
     {
         echo "# Per-machine profile selection — see miserc.example.toml"
-        if [[ -n "$PROFILES" ]]; then
+        if [[ ${#selected[@]} -gt 0 ]]; then
             printf 'env = ['
-            first=1
-            IFS=',' read -ra parts <<<"$PROFILES"
-            for p in "${parts[@]}"; do
-                p="$(echo "$p" | tr -d '[:space:]')"
-                [[ -z "$p" ]] && continue
-                [[ $first -eq 1 ]] || printf ', '
-                printf '"%s"' "$p"
-                first=0
+            for i in "${!selected[@]}"; do
+                [[ $i -eq 0 ]] || printf ', '
+                printf '"%s"' "${selected[$i]}"
             done
             printf ']\n'
         else
             echo 'env = []'
         fi
     } >"$MISERC"
-    ok "Wrote mise/miserc.toml (profiles: ${PROFILES:-none})"
+    ok "Wrote mise/miserc.toml (profiles: ${selected[*]:-none})"
 fi
 
 # ── 5. Validate config before handing over to mise ────────────────────────────
@@ -115,10 +135,38 @@ if command -v python3 &>/dev/null; then
         warn "Config collision lint failed — fix before bootstrapping."
         exit 1
     }
+else
+    warn "python3 not found — skipping config collision lint"
 fi
 
-# ── 6. Trust + bootstrap ──────────────────────────────────────────────────────
+# ── 6. Trust + back up conflicting dotfile targets ────────────────────────────
 mise trust "$REPO/mise/config.toml" >/dev/null
+# mise refuses to replace existing real files (and --force would replace them
+# WITHOUT backup), so move aside any symlink-mode target that exists and
+# differs — e.g. the skel ~/.bashrc on a fresh account, or files restored from
+# stow backups during a cutover from the old repo.
+cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
+if command -v python3 &>/dev/null; then
+    mise dotfiles status --json 2>/dev/null |
+        python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+for f in data.get("files", []):
+    if f.get("mode") == "symlink" and f.get("state") == "differs":
+        print(f["target"])
+' |
+        while IFS= read -r target; do
+            expanded="${target/#\~/$HOME}"
+            [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+            bak="$expanded.pre-mise.bak"
+            n=1
+            while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+            warn "Backing up conflicting $target -> $bak"
+            mv "$expanded" "$bak"
+        done
+fi
+
+# ── 7. Bootstrap ──────────────────────────────────────────────────────────────
 info "Running mise bootstrap..."
 if [[ "$NONINTERACTIVE" == "1" ]]; then
     mise bootstrap --yes

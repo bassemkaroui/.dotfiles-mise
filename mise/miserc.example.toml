@@ -1,0 +1,27 @@
+# Per-machine profile selection. Copy to miserc.toml (gitignored) — or let
+# install.sh seed it — and list the profiles this machine should activate.
+# Each profile is a config.<name>.toml in this directory; profiles only ADD
+# capability (tools, packages, dotfiles, gated tasks). Core is always on.
+#
+# Profiles:
+#   graphical  Ghostty & Obsidian + configs, Nerd Font + terminal fonts
+#   gnome      GNOME themes + shell extensions            (implies: graphical)
+#   cosmic     COSMIC theme + ddcutil/i2c setup           (implies: graphical)
+#   ai         claude, sandbox-runtime
+#   dev        uv, corepack, pre-commit, doppler
+#   yazi       yazi + preview stack (glow, hexyl, duckdb)
+#   neovim     neovim, tree-sitter-cli, personal nvim config
+#   media      ffmpeg + imagemagick (apt)
+#   veracrypt  VeraCrypt console edition
+#   laptop     device marker for template-mode dotfiles (mutually exclusive
+#   desktop    with each other; no standalone config file)
+#
+# "implies" is documentation, not mechanics — list implied profiles explicitly.
+#
+# Example workstation:
+# env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
+#
+# Example headless server:
+# env = ["dev"]
+
+env = []

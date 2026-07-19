@@ -1,0 +1,10 @@
+# Profile: neovim — editor + build deps + personal config (old conf.d/neovim.toml
+# + the nvim stow package, which was a git submodule).
+# fd/ripgrep moved to core. The `upstream` remote (nvim-lua/kickstart.nvim) is
+# restored by the update:repos task (Phase 5) — it isn't recorded by a clone.
+[tools]
+neovim = "stable"
+"cargo:tree-sitter-cli" = { version = "latest", depends = "rust" }
+
+[bootstrap.repos]
+"~/.config/nvim" = { url = "https://github.com/bassemkaroui/kickstart.nvim.git", ref = "custom_config" }

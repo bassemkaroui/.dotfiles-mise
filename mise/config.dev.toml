@@ -1,0 +1,8 @@
+# Profile: dev — dev/build/secrets tooling (old conf.d/dev.toml)
+# corepack activation (`corepack enable`) runs as a gated step in the bootstrap
+# task (Phase 3) — hooks can't see profiles.
+[tools]
+uv = "latest"
+"npm:corepack" = "latest"
+pre-commit = "latest"
+doppler = { version = "latest", exe = "doppler" }

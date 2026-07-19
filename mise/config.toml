@@ -1,0 +1,93 @@
+# Core mise config — deployed as ~/.config/mise/config.toml via the install.sh
+# dir symlink. This file owns ALL structure shared by every machine; profile
+# files (config.<profile>.toml) only ADD capability and never redeclare a key
+# that exists here (enforced by scripts/lint-config.py).
+
+[settings]
+activate_aggressive = true
+go_set_gobin = false
+dotfiles.root = "~/.dotfiles-mise/home"
+
+[settings.task]
+run_auto_install = false
+
+# ── Tools ─────────────────────────────────────────────────────────────────────
+# Core = old runtime.toml (always-on runtimes) + cli.toml + the shell-integration
+# tools .zshrc guards on (previously spread across yazi.toml/neovim.toml).
+[tools]
+# For mise completions and #USAGE task specs
+usage = "latest"
+# language runtimes
+rust = "latest"
+go = "latest"
+node = "latest"
+zig = "0.15.2"
+# terminal & git CLIs
+tmux = "latest"
+bat = "latest"
+delta = "latest"
+tlrc = "latest"
+gh = "latest"
+"aqua:dlvhdr/gh-dash" = "latest"
+"pipx:urlscan" = "latest"
+resvg = "latest"
+"github:aristocratos/btop" = "latest"
+hunk = "latest"
+# conda-forge git: newer than Ubuntu's, linked against OpenSSL libcurl rather
+# than libcurl-gnutls. The conda backend is self-contained (no conda/mamba needed).
+"conda:git" = "latest"
+# shell-integration tools (used by the guarded stanzas in home/.zshrc)
+fzf = "latest"
+zoxide = "latest"
+eza = "latest"
+fd = "latest"
+ripgrep = "latest"
+jq = "latest"
+
+# ── System packages (Debian-family; installs go through mise's apt manager) ──
+[bootstrap.packages]
+# login shell (no source-build fallback in v1 — apt is a hard requirement)
+"apt:zsh" = "latest"
+# bootstrap.repos clones run before mise-managed conda:git is on PATH
+"apt:git" = "latest"
+# used by install.sh, tasks, and various tool installers
+"apt:curl" = "latest"
+# cargo: backend builds (tree-sitter-cli) and general rust development
+"apt:build-essential" = "latest"
+"apt:pkg-config" = "latest"
+# font/archive handling in tasks
+"apt:unzip" = "latest"
+# pipx: backend needs a venv-capable python
+"apt:python3-venv" = "latest"
+# interactive apt frontend (user preference; automation never depends on it)
+"apt:nala" = "latest"
+
+# ── Git repos (replaces oh-my-zsh installer, plugin clones, and submodules) ──
+[bootstrap.repos]
+"~/.oh-my-zsh" = { url = "https://github.com/ohmyzsh/ohmyzsh.git" }
+"~/.oh-my-zsh/custom/plugins/zsh-autosuggestions" = { url = "https://github.com/zsh-users/zsh-autosuggestions.git" }
+"~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" = { url = "https://github.com/zsh-users/zsh-syntax-highlighting.git" }
+"~/.oh-my-zsh/custom/plugins/fzf-tab" = { url = "https://github.com/Aloxaf/fzf-tab.git" }
+"~/.oh-my-zsh/custom/themes/powerlevel10k" = { url = "https://github.com/romkatv/powerlevel10k.git" }
+# oh-my-tmux (was a git submodule); its tmux.conf is wired up in Phase 2
+"~/.tmux" = { url = "https://github.com/gpakosz/.tmux.git", ref = "master" }
+# PathPicker (fpp); the ~/.local/bin/fpp symlink task lands in Phase 3
+"~/.local/opt/PathPicker" = { url = "https://github.com/facebook/PathPicker.git" }
+
+# ── Login shell ───────────────────────────────────────────────────────────────
+# NSS-managed accounts (OS Login/LDAP) where chsh can't work get a fallback
+# task in Phase 3 (`exec zsh` from ~/.bash_profile).
+[bootstrap.user]
+login_shell = "/usr/bin/zsh"
+
+# ── Dotfiles ──────────────────────────────────────────────────────────────────
+# Sourceless entries mirror the target path under dotfiles.root (home/).
+# ~/.config/completions is NOT managed: .zshrc creates it and generates into it.
+[dotfiles]
+"~/.zshrc" = { mode = "symlink" }
+"~/.zshenv" = { mode = "symlink" }
+"~/.zprofile" = { mode = "symlink" }
+"~/.p10k.zsh" = { mode = "symlink" }
+"~/.bashrc" = { mode = "symlink" }
+"~/.profile" = { mode = "symlink" }
+"~/.bash_logout" = { mode = "symlink" }

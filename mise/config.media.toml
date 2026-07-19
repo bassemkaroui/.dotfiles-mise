@@ -1,0 +1,5 @@
+# Profile: media — ffmpeg + imagemagick via apt (old install:media-tools).
+# The no-sudo ubi static-binary fallback was consciously dropped (user-approved).
+[bootstrap.packages]
+"apt:ffmpeg" = "latest"
+"apt:imagemagick" = "latest"

@@ -1,0 +1,4 @@
+# Profile: ai — AI agent tooling (old conf.d/ai.toml)
+[tools]
+claude = "latest"
+"npm:@anthropic-ai/sandbox-runtime" = "latest"

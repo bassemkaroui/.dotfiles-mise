@@ -1,0 +1,37 @@
+# ── Per-machine state (lives inside mise/ because ~/.config/mise symlinks there) ──
+/mise/miserc.toml
+/mise/conf.d/*
+!/mise/conf.d/.gitkeep
+
+# ── Vendored upstream docs (refresh with docs/fetch.sh) ──
+/docs/upstream/
+
+# ── Defense-in-depth: runtime writes / secrets that must never be committed (D8) ──
+# These targets are deployed per-file (never whole-dir symlinks), so live tools
+# shouldn't be able to write here — but if anything ever does, git must not see it.
+/home/.config/gh/hosts.yml
+/home/.config/gh/state.yml
+/home/.gnupg/*
+!/home/.gnupg/gpg-agent.conf
+/home/.claude/*
+!/home/.claude/commands
+!/home/.claude/skills
+!/home/.claude/agents
+!/home/.claude/.editorconfig
+!/home/.claude/CLAUDE.md
+!/home/.claude/keybindings.json
+!/home/.claude/settings.json
+!/home/.claude/statusline-command.sh
+/home/.config/tmux/plugins/
+/home/.config/completions/_*
+
+# ── Editor / OS / tooling artifacts ──
+.mypy_cache/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

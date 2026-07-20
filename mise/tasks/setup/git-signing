@@ -8,11 +8,16 @@ TASK_NAME="setup:git-signing"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# D12: git identity (name, email, signing key) stays in the PRIVATE custom repo
-# — it is the one thing in this migration that must not land in a repo that
-# might ever be mirrored publicly. That repo ships ~/.gitconfig.local.example;
-# this task turns it into the live ~/.gitconfig.local, but only once the
-# matching secret key actually exists on the machine.
+# D12: git identity and the signing key stay in the PRIVATE companion repo —
+# the one thing in this migration that must not land in a repo that might ever
+# be mirrored publicly. The split, as of the git port:
+#
+#   ~/.gitconfig            this repo — everything shareable, ending in two
+#                           [include]s (git ignores a missing include)
+#   ~/.gitconfig.identity   companion repo — user.name / user.email
+#   ~/.gitconfig.local      THIS TASK — written from the companion repo's
+#                           ~/.gitconfig.local.example, but only once the
+#                           matching secret key actually exists here
 EXAMPLE="$HOME/.gitconfig.local.example"
 TARGET="$HOME/.gitconfig.local"
 

@@ -1,0 +1,60 @@
+# Shareable git configuration. Everything here is true on every machine and
+# for every user of this repo.
+#
+# What is NOT here, by design (D12):
+#   ~/.gitconfig.identity  name + email        — deployed by your private repo
+#   ~/.gitconfig.local     signing key + gpgsign — written by setup:git-signing
+#                                                  from that repo's example file
+# Both are pulled in by the [include] section at the bottom. git ignores an
+# include whose file does not exist, so a machine without either still gets a
+# working git — it just won't know who you are until you supply one.
+
+[pull]
+	rebase = true
+[push]
+	followTags = true
+
+[core]
+	editor = nvim
+	pager = delta
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	side-by-side = true
+[merge]
+	# NOTE: the old repo had this misspelled as `confictStyle`, which git
+	# silently ignores — so zdiff3 was never actually in effect.
+	conflictStyle = zdiff3
+
+[init]
+	defaultBranch = main
+	templatedir = ~/.git-template
+[submodule]
+	recurse = true
+
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+
+# gh brokers GitHub credentials; the empty `helper =` first resets any helper
+# inherited from /etc/gitconfig.
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
+
+[alias]
+	cr = config remote.origin.fetch \"+refs/heads/*:refs/remotes/origin/*\"
+	l = log --decorate --graph --oneline --all
+	lc = log --decorate --graph --all --color --pretty=format:'%C(auto)%h %ad%d %C(reset)%s' --date=short
+
+# Keep last: later includes win, so private values override anything above.
+[include]
+	path = ~/.gitconfig.identity
+[include]
+	path = ~/.gitconfig.local

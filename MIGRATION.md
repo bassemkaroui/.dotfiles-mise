@@ -127,6 +127,14 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - **mise creates missing parent directories with the process umask** (0755/0775), which gpg
   rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
   change the mode afterwards.
+- **`mode = "template"` overwrites a pre-existing real file silently** — no error, no backup,
+  where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target,
+  not just symlink-mode ones. This is why the cutover backup tar matters even though mise
+  "shouldn't" clobber anything.
+- **No `[bootstrap.user]` section, deliberately.** Its one command is a bare `chsh -s`, which
+  PAM-prompts and so fails unattended — and a failing bootstrap step aborts every later step,
+  including the whole `[tasks.bootstrap]` tail. `setup:login-shell-fallback` owns the login
+  shell instead (sudo chsh → sudo usermod → interactive chsh → `exec zsh`).
 - **A `[tasks.bootstrap]` step that exits non-zero aborts every step after it** and fails
   `mise bootstrap` with that code (verified). That shapes the whole imperative tail: the
   steps every machine needs run first, the optional installs last, and those installs treat

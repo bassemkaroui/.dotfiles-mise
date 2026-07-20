@@ -11,7 +11,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | ~~Stow packages `fzf bat tmux gh gh-dash claude ruff hunk gpg yazi`~~ ✅ | `[dotfiles]` core entries (+ `yazi` profile) | 2 |
 | ~~Stow package `ghostty` (config only)~~ ✅ | `graphical` profile `[dotfiles]` | 2 |
 | Stow package `nvim` | `neovim` profile `[bootstrap.repos]` (done in Phase 1) | 1 |
-| Stow package `gnome_themes` (+DE auto-exclude) | `gnome` profile `[dotfiles]` | 4 |
+| ~~Stow package `gnome_themes` (+DE auto-exclude)~~ ✅ | `gnome` profile `[dotfiles]` (`home/.themes/`) | 4 |
 | Stow package `mise` (nested stow) | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
 | conf.d tool groups (`runtime cli dev ai yazi neovim`) | core `[tools]` + profile files | 1–2 |
 | `.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + `setup:{device-tag,exclude,mise-conf-exclude,install-exclude}` | `mise/miserc.toml` profiles | 0 |
@@ -25,13 +25,13 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | `install:media-tools` | `media` profile apt entries (ubi fallback dropped) | 2 |
 | chsh/usermod cascade (`setup:zsh` Phase 2) | `[bootstrap.user].login_shell` + NSS fallback task | 1, 3 |
 | `.zshrc` block injection (`setup:zsh-config`, `setup:shell-tools`) | baked into committed `.zshrc` w/ runtime guards | 1 |
-| `install:ghostty`, `install:obsidian`, `install:veracrypt` | ported tasks, profile-gated (`graphical`, `veracrypt`) | 3 |
-| fonts + terminal fonts (inside `setup:zsh`) | `setup:fonts` task (`graphical`) | 3 |
+| ~~`install:ghostty`, `install:obsidian`, `install:veracrypt`~~ ✅ | ported tasks, profile-gated (`graphical`, `veracrypt`) | 3b |
+| ~~fonts + terminal fonts (inside `setup:zsh`)~~ ✅ | `setup:fonts` task (`graphical`) | 3b |
 | ~~`setup:completions`, `setup:git-signing`~~ ✅ | ported tasks in `[tasks.bootstrap]` | 3a |
 | ~~`setup:zsh` Phase 2 rungs 1/3/4 (sudo chsh, sudo usermod, `exec zsh`)~~ ✅ | `setup:login-shell-fallback` — mise's `[bootstrap.user]` only runs bare `chsh -s` | 3a |
 | hostname prompt (`setup:zsh` Phase 6) | dropped — see below | 3a |
-| `install:gnome-extensions`, `update:gnome-extensions` | `gnome` profile tasks | 4 |
-| `setup:cosmic*` | `cosmic` profile tasks | 4 |
+| ~~`install:gnome-extensions`, `update:gnome-extensions`~~ ✅ | `gnome` profile tasks (manifest still supplied by the custom repo) | 4 |
+| ~~`setup:cosmic*`~~ ✅ | `cosmic` profile tasks (theme picker is manual, not chained) | 4 |
 | `gpg:*` suite | ported near-verbatim | 5 |
 | `update:submodules` + submodule-freshness workflow | `update:repos` task + workflow | 5 |
 | `update:obsidian` | ported | 5 |
@@ -54,6 +54,19 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   `.bashrc` ever sourced it, and its `~/.fzf/bin` PATH block refers to an install method
   neither repo uses (fzf is a `[tools]` entry). `~/.fzf.zsh` *is* sourced by `.zshrc` and
   is kept.
+- **Every interactive prompt inside the bootstrap path** (session B). The old install tasks
+  asked "install X anyway?", "which method?", "persist this choice?"; a chained task has no
+  terminal at all — stdin is not a tty and `/dev/tty` cannot be opened (verified) — so the
+  answers now come from the profile (consent), a `--method`/`$GHOSTTY_INSTALL_METHOD`
+  choice, and a `--update` flag. `setup:cosmic-theme` keeps its menu but is no longer
+  invoked by `setup:cosmic`; run it by hand.
+- **Automatic upgrades of ghostty/obsidian on every bootstrap.** The old tasks prompted, and
+  skipped the upgrade under `DOTFILES_NONINTERACTIVE`. Without a prompt, upgrading by
+  default would swap a running app's binary whenever upstream moved, so an available
+  upgrade is now *reported* and applied only with `--update`.
+- **The `busybox unzip` third-choice font extractor** (`setup:zsh` had unzip → python3 →
+  busybox). `unzip` is a `[bootstrap.packages]` entry and python3 is required by
+  `install.sh` anyway, so the third rung had no reachable audience.
 
 ### Carried over unchanged, but questionable (decide before/at cutover)
 
@@ -103,13 +116,25 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - **mise creates missing parent directories with the process umask** (0755/0775), which gpg
   rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
   change the mode afterwards.
+- **A `[tasks.bootstrap]` step that exits non-zero aborts every step after it** and fails
+  `mise bootstrap` with that code (verified). That shapes the whole imperative tail: the
+  steps every machine needs run first, the optional installs last, and those installs treat
+  anything environmental (no network, no sudo, no desktop session, no upstream asset for
+  this Ubuntu release) as `warn` + `exit 0` rather than a failure.
+- **`mise run cleanup` reaps only DANGLING links** — ones whose source left the repo. It
+  does *not* reap links whose profile was deselected, because mise has no removal semantics
+  and the source is still right there. Deselecting `gnome` leaves `~/.themes/*` behind;
+  delete those by hand when switching desktops.
+- **`dconf` exits 0 with nowhere to persist a write** (no session bus / a sandboxed HOME):
+  the write silently goes nowhere. `setup:fonts` reads the value back rather than trusting
+  the exit code.
 
 ## Cutover checklist (per machine — manual, run by a human)
 
 1. `cd ~/.dotfiles && git pull` — make sure the old repo is current, commit any local changes.
 2. Back up (`-h` dereferences the stow symlinks so the archive stores real content, not
    dangling links):
-   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.fzf.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp 2>/dev/null`
+   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.fzf.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp ~/.themes ~/.local/share/{fonts,gnome-extensions,applications/obsidian.desktop} 2>/dev/null`
 3. Unstow everything with the OLD repo (restores its `.bak` backups):
    for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
    `.device-tag`). The `mise` package last.

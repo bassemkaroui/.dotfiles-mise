@@ -109,6 +109,51 @@ def check_sources(rel: str, data: dict, problems: list[str]) -> None:
             problems.append(f"MISSING SOURCE: [dotfiles] {key!r} in {rel} -> {source}")
 
 
+def check_repo_sources(rel: str, data: dict, problems: list[str]) -> None:
+    """Every [dotfiles] entry must have a source that exists in this repo.
+
+    Two different failure modes make this worth a lint rather than trusting
+    mise to complain (both verified on 2026.7.7):
+
+      - an entry with an EXPLICIT source that doesn't exist aborts the whole
+        `dotfiles apply` — every other dotfile with it, not just that entry;
+      - an entry with NO source (the mirrored `dotfiles.root` path) whose file
+        is missing is silently dropped: it never deploys, never appears in
+        `mise dotfiles status`, and `status --missing` still exits 0. A typo in
+        a target path therefore produces a permanently unmanaged file with all
+        checks green.
+
+    Only repo-resolvable sources are checked. Sources pointing at paths a
+    bootstrap step creates (a cloned repo, a machine-local file) can't be
+    verified from a checkout — and belong in a task anyway, precisely because
+    of the abort-the-whole-apply behaviour above.
+    """
+    root = os.path.join(REPO, "home")
+    for key, value in extract("dotfiles", data).items():
+        source = value.get("source") if isinstance(value, dict) else value
+        if isinstance(source, str):
+            if any(c in source for c in "*?["):
+                continue  # glob: mise expands it, and zero matches is legal
+            if source.startswith("~/.dotfiles-mise/"):
+                path = os.path.join(REPO, source[len("~/.dotfiles-mise/") :])
+            elif not os.path.isabs(source) and not source.startswith("~"):
+                path = os.path.join(MISE_DIR, source)  # relative to the config file
+            else:
+                continue  # outside the repo — not knowable from a checkout
+        else:
+            # Sourceless entries mirror the home-relative target under
+            # dotfiles.root. Targets outside $HOME must declare a source
+            # (dotfiles.md), so there is nothing to resolve for them.
+            if not key.startswith("~/"):
+                continue
+            path = os.path.join(root, key[len("~/") :])
+        if not os.path.exists(path):
+            problems.append(
+                f"MISSING SOURCE: [dotfiles] {key!r} in {rel} -> {os.path.relpath(path, REPO)} "
+                f"does not exist in the repo"
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -162,6 +207,8 @@ def main() -> int:
         check_self_managed(path, rel, data, problems)
         if args.live:
             check_sources(rel, data, problems)
+        else:
+            check_repo_sources(rel, data, problems)
 
     if not args.live:
         core = os.path.join(MISE_DIR, SELF_MANAGED_OWNER)

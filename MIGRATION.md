@@ -8,7 +8,9 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 |---|---|---|
 | `mise run init` + `bootstrap` task chain | `install.sh` → `mise bootstrap` | 0–3 |
 | Stow packages `bash zsh p10k` | `[dotfiles]` core entries | 1 |
-| Stow packages `fzf bat tmux gh gh-dash claude ghostty ruff hunk gpg yazi nvim` | `[dotfiles]` core/profile entries | 2 |
+| ~~Stow packages `fzf bat tmux gh gh-dash claude ruff hunk gpg yazi`~~ ✅ | `[dotfiles]` core entries (+ `yazi` profile) | 2 |
+| ~~Stow package `ghostty` (config only)~~ ✅ | `graphical` profile `[dotfiles]` | 2 |
+| Stow package `nvim` | `neovim` profile `[bootstrap.repos]` (done in Phase 1) | 1 |
 | Stow package `gnome_themes` (+DE auto-exclude) | `gnome` profile `[dotfiles]` | 4 |
 | Stow package `mise` (nested stow) | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
 | conf.d tool groups (`runtime cli dev ai yazi neovim`) | core `[tools]` + profile files | 1–2 |
@@ -16,14 +18,18 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | tag-default→tag-X fallback | template-mode entries on `mise_env` | 2 |
 | oh-my-zsh installer, plugin/p10k/fzf-tab clones (`setup:zsh`, `setup:shell-tools`) | `[bootstrap.repos]` | 1 |
 | oh-my-tmux + nvim git **submodules** | `[bootstrap.repos]` (real clones at live paths) | 2 |
-| `install:pathpicker` | `[bootstrap.repos]` + symlink task | 2–3 |
+| ~~`install:pathpicker`~~ ✅ | `[bootstrap.repos]` + `setup:repo-links` task | 2–3 |
+| ~~`setup:nodes-tools` (corepack enable)~~ ✅ | `post-tools` hook, guarded on `command -v corepack` | 3a |
+| `setup:p10k-icon` (writes `~/.p10k.local.zsh`) | still unported — `home/.zshrc` sources that file, so the overlay works; the icon-writing task itself | 5 |
 | `install:build-deps`, `install:nala`, zsh install | `[bootstrap.packages]` apt entries | 1 |
 | `install:media-tools` | `media` profile apt entries (ubi fallback dropped) | 2 |
 | chsh/usermod cascade (`setup:zsh` Phase 2) | `[bootstrap.user].login_shell` + NSS fallback task | 1, 3 |
 | `.zshrc` block injection (`setup:zsh-config`, `setup:shell-tools`) | baked into committed `.zshrc` w/ runtime guards | 1 |
 | `install:ghostty`, `install:obsidian`, `install:veracrypt` | ported tasks, profile-gated (`graphical`, `veracrypt`) | 3 |
 | fonts + terminal fonts (inside `setup:zsh`) | `setup:fonts` task (`graphical`) | 3 |
-| `setup:completions`, `setup:git-signing`, hostname prompt | ported tasks in `[tasks.bootstrap]` | 3 |
+| ~~`setup:completions`, `setup:git-signing`~~ ✅ | ported tasks in `[tasks.bootstrap]` | 3a |
+| ~~`setup:zsh` Phase 2 rungs 1/3/4 (sudo chsh, sudo usermod, `exec zsh`)~~ ✅ | `setup:login-shell-fallback` — mise's `[bootstrap.user]` only runs bare `chsh -s` | 3a |
+| hostname prompt (`setup:zsh` Phase 6) | dropped — see below | 3a |
 | `install:gnome-extensions`, `update:gnome-extensions` | `gnome` profile tasks | 4 |
 | `setup:cosmic*` | `cosmic` profile tasks | 4 |
 | `gpg:*` suite | ported near-verbatim | 5 |
@@ -41,6 +47,26 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - VeraCrypt default-on → opt-in profile.
 - Fine-grained `.install-exclude` axis (obsidian/ghostty/veracrypt/pathpicker individually) —
   granularity is now per-profile.
+- **Interactive hostname prompt** (`setup:zsh` Phase 6). It asked on every bootstrap and did
+  one `hostnamectl` call; it has nothing to do with dotfiles. Set the hostname with
+  `sudo hostnamectl set-hostname <name>`.
+- **`~/.fzf.bash`.** Shipped by the old `fzf` stow package, but nothing in either repo's
+  `.bashrc` ever sourced it, and its `~/.fzf/bin` PATH block refers to an install method
+  neither repo uses (fzf is a `[tools]` entry). `~/.fzf.zsh` *is* sourced by `.zshrc` and
+  is kept.
+
+### Carried over unchanged, but questionable (decide before/at cutover)
+
+- **Ghostty**: `~/.config/ghostty/config` is 0 bytes while `config.ghostty` (341 B) holds
+  every setting — theme, font size, `background-opacity`, `background-blur`. Ghostty reads
+  `config`, and nothing in the old repo generates it, so those settings appear to be inert
+  today. Both files are ported verbatim to avoid a silent behaviour change; folding
+  `config.ghostty` into `config` is a one-line fix once confirmed.
+- **`~/.p10k.zsh` is declared by this repo AND by the custom repo** (`p10k/tag-desktop/`).
+  Same key in two repos means undefined precedence (§2.2 of the plan) and `lint-config.py`
+  only sees this one. Phase 6 must resolve it — either move the desktop delta into the
+  `~/.p10k.local.zsh` overlay (`home/.zshrc` already sources it) or capture per machine with
+  `mise dotfiles add ~/.p10k.zsh`. The same applies to any other key the custom repo shares.
 
 ### Known mise limitations we compensate for
 - No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc. Renaming or deleting a
@@ -56,13 +82,28 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - Sibling-config precedence inconsistent → one-key-one-file rule + `scripts/lint-config.py`.
 - `$MISE_ENV` invisible to hooks → all profile gating happens in tasks.
 - `--force-dotfiles` replaces without backup → cutover always unstows via the old repo first.
+  `install.sh` additionally *refuses to run* while any managed target still resolves into
+  `~/.dotfiles`, because the old repo deploys whole directories (`~/.config/bat`,
+  `~/.config/tmux`, `~/.config/yazi`, …) as symlinks — applying through one of those would
+  rewrite files inside the rollback path.
+- **A `[dotfiles]` entry whose explicit `source` is missing aborts the entire apply**, not
+  just that entry (verified 2026-07-20). So no entry may point at a path an earlier bootstrap
+  step creates: `~/.config/tmux/tmux.conf` → `~/.tmux/.tmux.conf` and `~/.local/bin/fpp` are
+  symlinked by the `setup:repo-links` task instead, where a missing clone is just a warning.
+- **A *sourceless* entry whose mirrored source is missing is silently ignored** — it never
+  deploys, never appears in `mise dotfiles status`, and `status --missing` still exits 0. A
+  typo'd target is therefore invisible; `scripts/lint-config.py` checks every entry's source
+  exists in the repo to compensate.
+- **mise creates missing parent directories with the process umask** (0755/0775), which gpg
+  rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
+  change the mode afterwards.
 
 ## Cutover checklist (per machine — manual, run by a human)
 
 1. `cd ~/.dotfiles && git pull` — make sure the old repo is current, commit any local changes.
 2. Back up (`-h` dereferences the stow symlinks so the archive stores real content, not
    dangling links):
-   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk} ~/.gnupg/gpg-agent.conf 2>/dev/null`
+   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.fzf.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp 2>/dev/null`
 3. Unstow everything with the OLD repo (restores its `.bak` backups):
    for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
    `.device-tag`). The `mise` package last.

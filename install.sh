@@ -173,6 +173,7 @@ shopt -u nullglob
 # ── 4. Per-machine profile selection (miserc.toml, machine-local) ─────────────
 MISERC="$CONF/miserc.toml"
 if [[ -f "$MISERC" ]]; then
+    # shellcheck disable=SC2088  # tilde is literal display text in a message, not a path
     ok "~/.config/mise/miserc.toml already present: $(grep -E '^env' "$MISERC" || echo '(no env line)')"
 else
     PROFILES="${DOTFILES_PROFILES:-}"
@@ -242,6 +243,55 @@ export MISE_GLOBAL_CONFIG_FILE="$REPO/mise/config.toml"
 # target that exists and differs: the skel ~/.bashrc on a fresh account, or
 # files restored from stow backups during a cutover from the old repo.
 cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
+
+# ── 6b. Refuse to deploy on top of the OLD repo's stow symlinks ───────────────
+# The predecessor repo (~/.dotfiles, GNU Stow) deploys whole DIRECTORIES as
+# symlinks: ~/.config/bat, ~/.config/tmux, ~/.config/yazi and friends point into
+# its working tree. A managed target underneath one of those resolves INTO the
+# old clone, so applying here would either replace an old-repo tracked file with
+# a symlink (mise converges same-content files without --force) or move it aside
+# to .pre-mise.bak — inside the old repo. That repo is the documented rollback
+# path, so corrupting it is the one failure this script must not allow.
+# MIGRATION.md step 3 (unstow first) is the fix; this makes it enforced rather
+# than merely documented.
+OLD_REPO="${DOTFILES_OLD_REPO:-$HOME/.dotfiles}"
+if [[ -d "$OLD_REPO" ]] && command -v python3 &>/dev/null; then
+    old_real="$(cd "$OLD_REPO" && pwd -P)"
+    conflicts=()
+    while IFS= read -r target; do
+        expanded="${target/#\~/$HOME}"
+        # Walk up to the nearest existing ancestor: the symlink is usually a
+        # parent directory, not the target itself (which doesn't exist yet).
+        probe="$expanded"
+        while [[ ! -e "$probe" && "$probe" != "/" && "$probe" != "$HOME" ]]; do
+            probe="$(dirname "$probe")"
+        done
+        resolved="$(readlink -f "$probe" 2>/dev/null || true)"
+        [[ -n "$resolved" && "$resolved" == "$old_real"/* ]] && conflicts+=("$target -> $resolved")
+    done < <(
+        { mise dotfiles status --json 2>/dev/null || true; } |
+            python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+for f in data.get("files", []):
+    print(f["target"])
+'
+    )
+    if ((${#conflicts[@]})); then
+        warn "These targets currently resolve INTO the old dotfiles repo ($OLD_REPO):"
+        for c in "${conflicts[@]}"; do warn "    $c"; done
+        die "Unstow the old repo first (MIGRATION.md step 3), then re-run this script.
+       Applying now would rewrite files inside $OLD_REPO — the rollback path.
+       Override with DOTFILES_OLD_REPO=/nonexistent only if you know better."
+    fi
+fi
+
 if command -v python3 &>/dev/null; then
     # `|| true`: a status failure must not kill the script via pipefail — the
     # backup pass is best-effort, and bootstrap below reports the real problem.

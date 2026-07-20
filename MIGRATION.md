@@ -57,11 +57,12 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 
 ### Carried over unchanged, but questionable (decide before/at cutover)
 
-- **Ghostty**: `~/.config/ghostty/config` is 0 bytes while `config.ghostty` (341 B) holds
-  every setting — theme, font size, `background-opacity`, `background-blur`. Ghostty reads
-  `config`, and nothing in the old repo generates it, so those settings appear to be inert
-  today. Both files are ported verbatim to avoid a silent behaviour change; folding
-  `config.ghostty` into `config` is a one-line fix once confirmed.
+- **Ghostty** ships two files: an empty `config` and `config.ghostty` (341 B) holding every
+  setting. That is not a bug — Ghostty 1.3.1 loads **both** names, with `config.ghostty`
+  taking precedence on conflicting keys (verified with `ghostty +show-config` against three
+  throwaway `XDG_CONFIG_HOME`s: `config.ghostty` alone works, `config` alone works, and with
+  both present `config.ghostty` wins). The `.ghostty` extension is what gets the file syntax
+  highlighting in editors. Both are ported verbatim.
 - **`~/.p10k.zsh` is declared by this repo AND by the custom repo** (`p10k/tag-desktop/`).
   Same key in two repos means undefined precedence (§2.2 of the plan) and `lint-config.py`
   only sees this one. Phase 6 must resolve it — either move the desktop delta into the

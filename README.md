@@ -44,7 +44,8 @@ Re-running any of it is safe — everything converges.
 
 ## Profiles
 
-A machine opts **in** to capability groups via `mise/miserc.toml` (gitignored, one per machine):
+A machine opts **in** to capability groups via `~/.config/mise/miserc.toml` (machine-local,
+outside the repo — `install.sh` seeds it):
 
 ```toml
 env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
@@ -54,8 +55,8 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 |---|---|
 | *(core, always on)* | runtimes (rust/go/node/zig), core CLI tools, shell configs (zsh + oh-my-zsh + p10k, bash), tmux, git tooling, gpg config, login shell |
 | `graphical` | Ghostty & Obsidian installs + configs, Nerd Font + terminal fonts |
-| `gnome` | GNOME themes + shell extensions |
-| `cosmic` | COSMIC theme + ddcutil/i2c setup |
+| `gnome` | GTK/shell themes + GNOME Shell extensions (implies `graphical`) |
+| `cosmic` | ddcutil/i2c setup; theme picker via `mise run setup:cosmic-theme` (implies `graphical`) |
 | `ai` | claude + sandbox-runtime |
 | `dev` | uv, corepack, pre-commit, doppler |
 | `yazi` | yazi + rich preview stack |

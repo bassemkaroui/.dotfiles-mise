@@ -6,7 +6,7 @@
 # Profiles:
 #   graphical  Ghostty & Obsidian + configs, Nerd Font + terminal fonts
 #   gnome      GNOME themes + shell extensions            (implies: graphical)
-#   cosmic     COSMIC theme + ddcutil/i2c setup           (implies: graphical)
+#   cosmic     ddcutil/i2c setup (theme: run setup:cosmic-theme)  (implies: graphical)
 #   ai         claude, sandbox-runtime
 #   dev        uv, corepack, pre-commit, doppler
 #   yazi       yazi + preview stack (glow, hexyl, duckdb)

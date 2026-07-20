@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#MISE description="Install ~/.gitconfig.local with the GPG signing block when the key is present"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:git-signing"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# D12: git identity (name, email, signing key) stays in the PRIVATE custom repo
+# — it is the one thing in this migration that must not land in a repo that
+# might ever be mirrored publicly. That repo ships ~/.gitconfig.local.example;
+# this task turns it into the live ~/.gitconfig.local, but only once the
+# matching secret key actually exists on the machine.
+EXAMPLE="$HOME/.gitconfig.local.example"
+TARGET="$HOME/.gitconfig.local"
+
+if [[ ! -f "$EXAMPLE" ]]; then
+    # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+    info "~/.gitconfig.local.example not found — the custom repo isn't deployed yet"
+    info "(wire it up with setup:custom-hookup, then re-run: mise run setup:git-signing)"
+    exit 0
+fi
+
+KEY_ID="$(git config --file "$EXAMPLE" --get user.signingkey 2>/dev/null || true)"
+if [[ -z "$KEY_ID" ]]; then
+    warn "user.signingkey not set in $EXAMPLE — nothing to do"
+    exit 0
+fi
+
+if ! command -v gpg &>/dev/null; then
+    warn "gpg not on PATH — skipping (install gpg and re-run: mise run setup:git-signing)"
+    exit 0
+fi
+
+if ! gpg --list-secret-keys "$KEY_ID" &>/dev/null; then
+    warn "GPG secret key $KEY_ID not found — import it and re-run: mise run setup:git-signing"
+    exit 0
+fi
+
+if [[ -e "$TARGET" ]]; then
+    # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+    ok "~/.gitconfig.local already present, leaving alone"
+    exit 0
+fi
+
+cp "$EXAMPLE" "$TARGET"
+ok_changed "Installed ~/.gitconfig.local (signing enabled with $KEY_ID)"

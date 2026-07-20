@@ -58,7 +58,10 @@ while IFS= read -r -d '' link; do
     [[ -e "$link" ]] || stale+=("$link")
 done < <(
     find "$HOME" -maxdepth 1 -type l -print0 2>/dev/null
-    for d in "$HOME/.config" "$HOME/.local/share" "$HOME/.local/bin"; do
+    # ~/.claude and ~/.gnupg hold managed links too (per-file, D8). ~/.claude
+    # matters most: commands/ is symlink-each, the mode where a per-file link is
+    # left dangling the moment a source file is deleted from the repo.
+    for d in "$HOME/.config" "$HOME/.local/share" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.gnupg"; do
         [[ -d "$d" ]] && find "$d" -type l -print0 2>/dev/null
     done
 )

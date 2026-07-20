@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+#MISE description="If the login shell still isn't zsh, exec into it from ~/.bash_profile"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:login-shell-fallback"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# [bootstrap.user].login_shell already tried the chsh/usermod route. It cannot
+# work for NSS-managed accounts (Google Cloud OS Login, LDAP, SSSD): those users
+# aren't in /etc/passwd at all, and chsh/usermod only edit /etc/passwd. It also
+# fails on locked-down hosts where chsh PAM-prompts and nobody is watching.
+# This is the old repo's Method 4 (setup:zsh Phase 2), kept as the last resort.
+#
+# Caveat inherited from the old repo: `exec zsh` only covers TTY/SSH logins.
+# Graphical terminal emulators read the shell from /etc/passwd, so on a desktop
+# with an NSS account the terminal profile still has to be pointed at zsh by
+# hand.
+
+if ! command -v zsh &>/dev/null; then
+    warn "zsh not installed — skipping (apt:zsh is a core [bootstrap.packages] entry)"
+    exit 0
+fi
+ZSH_PATH="$(command -v zsh)"
+
+# $USER is unset under cron, `docker exec`, and some CI runners; getent with an
+# empty argument would silently return the wrong thing.
+USER="${USER:-$(id -un)}"
+CURRENT_SHELL="$(getent passwd "$USER" 2>/dev/null | cut -d: -f7 || true)"
+[[ -z "$CURRENT_SHELL" ]] && CURRENT_SHELL="${SHELL:-}"
+
+if [[ "$CURRENT_SHELL" == *zsh* ]]; then
+    ok "Login shell is already zsh ($CURRENT_SHELL)"
+    exit 0
+fi
+
+# mise's [bootstrap.user] runs exactly one command: `chsh -s <shell>` (upstream
+# bootstrap/user.md). That is rung 2 of the old repo's four-rung cascade
+# (setup/zsh:112-158). Rungs 1 and 3 — `sudo chsh` and `sudo usermod` — are the
+# ones that work unattended, because bare chsh PAM-prompts for a password. CI,
+# provisioning and `docker exec` all land there, so try them before falling back
+# to a login file. NSS-managed accounts skip both: they aren't in /etc/passwd,
+# so chsh/usermod can only fail with "user does not exist".
+NSS_ONLY=false
+if ! grep -q "^${USER}:" /etc/passwd 2>/dev/null; then
+    NSS_ONLY=true
+    info "User '$USER' is NSS-managed (not in /etc/passwd) — chsh/usermod can't work here"
+fi
+
+if [[ "$NSS_ONLY" == false ]] && command -v sudo &>/dev/null; then
+    # Non-interactive sudo only: a password prompt here would hang an
+    # unattended bootstrap, which is the scenario this rung exists for.
+    if sudo -n true 2>/dev/null; then
+        if command -v chsh &>/dev/null && sudo -n chsh -s "$ZSH_PATH" "$USER" 2>/dev/null; then
+            ok_changed "Login shell changed to $ZSH_PATH via sudo chsh"
+            exit 0
+        fi
+        # No `command -v usermod` guard: it lives in /usr/sbin, which is
+        # usually off a non-root PATH even though sudo can run it.
+        if sudo -n usermod -s "$ZSH_PATH" "$USER" 2>/dev/null; then
+            ok_changed "Login shell changed to $ZSH_PATH via sudo usermod"
+            exit 0
+        fi
+    fi
+fi
+
+# ~/.bash_profile, not ~/.profile: bash prefers it, and ~/.profile is a managed
+# [dotfiles] symlink — appending to it would write into the repo.
+LOGIN_FILE="$HOME/.bash_profile"
+
+if grep -q '^exec zsh$' "$LOGIN_FILE" 2>/dev/null; then
+    ok "exec zsh already in $LOGIN_FILE"
+    exit 0
+fi
+
+if [[ -L "$LOGIN_FILE" ]]; then
+    warn "$LOGIN_FILE is a symlink — refusing to append (it would edit the link target)"
+    warn "Add 'exec zsh' to your login file by hand, or point the account at $ZSH_PATH"
+    exit 0
+fi
+
+{
+    printf '\n# Added by mise run setup:login-shell-fallback — the account shell is\n'
+    printf '# %s and could not be changed to zsh.\n' "${CURRENT_SHELL:-unknown}"
+    printf 'export SHELL=%s\n' "$ZSH_PATH"
+    printf 'exec zsh\n'
+} >>"$LOGIN_FILE"
+ok_changed "Added 'exec zsh' to $LOGIN_FILE (login shell was ${CURRENT_SHELL:-unknown})"

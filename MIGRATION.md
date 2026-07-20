@@ -38,6 +38,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | `lint` (shellcheck/shfmt) | ported + `lint-config` collision lint | 0, 5 |
 | p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`) | run wizard → `mise dotfiles add ~/.p10k.zsh` | 5 (docs) |
 | `~/.dotfiles-custom` + `setup:custom-dotfiles` | custom repo v2: `conf.d/50-custom.toml` drop-in | 6 |
+| git config: aliases, delta, lfs, credential helpers, `.git-completion.bash`, `.git-prompt.sh`, `.git-template/` | **moved out of the custom repo** into `home/` — none of it is private | 6 |
+| git identity (`user.name`/`user.email`) | private repo → `~/.gitconfig.identity`, pulled in by an `[include]` | 6 |
 | `setup:git-signing` data (`~/.gitconfig.local.example` from custom repo) | stays in custom repo (privacy) | 6 |
 | Public-mirror sanitize workflow | TBD (ask user) | 6 |
 

@@ -201,6 +201,19 @@ login_shell = "/usr/bin/zsh"
 "~/.claude/skills" = { mode = "symlink-each" }
 "~/.claude/agents" = { mode = "symlink-each" }
 
+# Git. The shareable half only: ~/.gitconfig ends with [include]s for
+# ~/.gitconfig.identity (name/email) and ~/.gitconfig.local (signing key),
+# neither of which this repo ships — they come from the private companion repo
+# and from setup:git-signing (D12). git ignores a missing include, so a machine
+# without either still has a working git.
+"~/.gitconfig" = { mode = "symlink" }
+# Sourced by the guarded stanzas in home/.bashrc.
+"~/.git-completion.bash" = { mode = "symlink" }
+"~/.git-prompt.sh" = { mode = "symlink" }
+# init.templatedir points here: hooks copied into every new/cloned repo.
+# symlink-each so a machine can drop its own hook in alongside ours.
+"~/.git-template/hooks" = { mode = "symlink-each" }
+
 "~/.config/ruff/ruff.toml" = { mode = "symlink" }
 "~/.config/hunk/config.toml" = { mode = "symlink" }
 

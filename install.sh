@@ -143,6 +143,12 @@ is_this_repo_mise_dir() {
 }
 
 OLD_REPO="${DOTFILES_OLD_REPO:-$HOME/.dotfiles}"
+# The private companion repo is deployed by the SAME stow run and is just as
+# much part of the rollback path: ~/.gitconfig, ~/.ssh/config, ~/.p10k.zsh and
+# ~/.local/share/gnome-extensions are symlinks into it on a machine that hasn't
+# cut over. Now that this repo declares ~/.gitconfig and friends, applying
+# without this check would rewrite files inside it.
+OLD_CUSTOM_REPO="${DOTFILES_OLD_CUSTOM_REPO:-$HOME/.dotfiles-custom}"
 
 LEGACY_SRC=""
 if [[ -L "$CONF" ]]; then
@@ -285,9 +291,10 @@ cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
 # replaced by mise without a conflict error (a symlink is never data to mise),
 # i.e. silently.
 guard_old_repo() {
-    [[ -d "$OLD_REPO" ]] || return 0
-    local old_real conflicts=() target expanded probe resolved
-    old_real="$(cd "$OLD_REPO" && pwd -P)"
+    [[ -d "$OLD_REPO" || -d "$OLD_CUSTOM_REPO" ]] || return 0
+    local old_reals=() conflicts=() target expanded probe resolved r
+    [[ -d "$OLD_REPO" ]] && old_reals+=("$(cd "$OLD_REPO" && pwd -P)")
+    [[ -d "$OLD_CUSTOM_REPO" ]] && old_reals+=("$(cd "$OLD_CUSTOM_REPO" && pwd -P)")
 
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
@@ -299,7 +306,10 @@ guard_old_repo() {
             probe="$(dirname "$probe")"
         done
         resolved="$(readlink -f "$probe" 2>/dev/null || true)"
-        [[ -n "$resolved" && "$resolved" == "$old_real"/* ]] && conflicts+=("$target -> $resolved")
+        [[ -n "$resolved" ]] || continue
+        for r in "${old_reals[@]}"; do
+            [[ "$resolved" == "$r"/* ]] && conflicts+=("$target -> $resolved")
+        done
     done < <(
         # [dotfiles] targets …
         { mise dotfiles status --json 2>/dev/null || true; } |
@@ -340,16 +350,17 @@ for r in data if isinstance(data, list) else []:
     )
 
     if ((${#conflicts[@]})); then
-        warn "These paths currently resolve INTO the old dotfiles repo ($OLD_REPO):"
+        warn "These paths currently resolve INTO an old stow repo (${old_reals[*]}):"
         for target in "${conflicts[@]}"; do warn "    $target"; done
-        die "Unstow the old repo first (MIGRATION.md step 3), then re-run this script.
-       Applying now would rewrite files inside $OLD_REPO — the rollback path.
-       Override with DOTFILES_OLD_REPO=/nonexistent only if you know better."
+        die "Unstow the old repo(s) first (MIGRATION.md step 3), then re-run this script.
+       Applying now would rewrite files inside them — the rollback path.
+       Override with DOTFILES_OLD_REPO / DOTFILES_OLD_CUSTOM_REPO=/nonexistent
+       only if you know better."
     fi
 }
 
-if [[ -d "$OLD_REPO" ]] && ! command -v python3 &>/dev/null; then
-    die "python3 is required to check whether $OLD_REPO is still deployed.
+if [[ -d "$OLD_REPO" || -d "$OLD_CUSTOM_REPO" ]] && ! command -v python3 &>/dev/null; then
+    die "python3 is required to check whether the old repos are still deployed.
       Without that check this script could rewrite files inside the old repo —
       the documented rollback path. Install python3 (apt install python3), or
       unstow the old repo and re-run with DOTFILES_OLD_REPO=/nonexistent."

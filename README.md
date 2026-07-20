@@ -99,6 +99,40 @@ Per-machine state lives **outside** the repo, in the real `~/.config/mise/`:
 `miserc.toml` (this machine's profiles), `conf.d/*.toml` (local drop-ins), and
 `config.local.toml` if you want one. Nothing machine-specific is ever committed.
 
+## Your own private companion repo
+
+Anything you don't want in a shareable repo — identity, keys, host lists, work config —
+goes in a second repo of your own that this one *extends itself with*. It is a plain
+directory with the same shape as this one, and nothing about it is specific to the author's
+setup:
+
+```
+~/.dotfiles-custom-mise/       (or $DOTFILES_CUSTOM_MISE_DIR)
+├── mise/config.custom.toml    [dotfiles] entries with explicit absolute sources
+└── home/                      the files those entries point at
+```
+
+`setup:custom-hookup`, a step in the `[tasks.bootstrap]` chain, links that config file to
+`~/.config/mise/conf.d/50-custom.toml` and applies it. No companion repo, no problem: the
+step warns and the bootstrap carries on.
+
+Rules the companion repo must follow — the first is the one that bites:
+
+- **Every entry needs an explicit `source = "~/.dotfiles-custom-mise/home/…"`.**
+  `settings.dotfiles.root` belongs to this repo, and a second declaration of it lands in
+  mise's undefined sibling-config precedence.
+- **It may not redeclare a key this repo declares** (or define `[tasks.bootstrap]`).
+  `python3 scripts/lint-config.py --live` checks exactly this — it loads this repo's keys as
+  a baseline and then scans `~/.config/mise/conf.d/`, so a collision is caught rather than
+  silently resolved. `install.sh` runs that pass on every install.
+- **Its sources must exist whenever its config file does**, because a `[dotfiles]` entry
+  with a missing explicit source aborts the *entire* apply — this repo's files included.
+
+This repo already leaves room for the usual private pieces: `~/.gitconfig` ends with
+`[include]`s for `~/.gitconfig.identity` and `~/.gitconfig.local`, and
+`templates/ssh_config.tmpl.example` shows how a companion repo does per-machine variants
+with template mode.
+
 ## Design rules (enforced, not aspirational)
 
 - **One key, one file.** mise's sibling-config precedence is inconsistent (verified on

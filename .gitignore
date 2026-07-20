@@ -27,6 +27,11 @@
 !/home/.claude/keybindings.json
 !/home/.claude/settings.json
 !/home/.claude/statusline-command.sh
+# Private git values must never land here — they belong in the companion repo.
+/home/.gitconfig.identity
+/home/.gitconfig.local
+/home/.gitconfig.local.example
+
 /home/.config/tmux/plugins/
 /home/.config/completions/_*
 

@@ -7,3 +7,10 @@ yazi = "latest"
 glow = "latest"
 hexyl = "latest"
 duckdb = "latest"
+
+# The whole config dir is one symlink, matching the old stow package: `ya pkg`
+# writes plugins/ and package.toml back through it into the repo, which is how
+# the vendored plugins and flavors got here in the first place. Nothing in this
+# tree is secret and yazi keeps its state in ~/.local/state.
+[dotfiles]
+"~/.config/yazi" = { mode = "symlink" }

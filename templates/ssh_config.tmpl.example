@@ -1,0 +1,41 @@
+{#-
+  Example: the device-variant mechanism that replaces the old repo's
+  tag-default → tag-<device> stow fallback.
+
+  The old repo picked a directory per machine (`.device-tag` + resolve_tag_dir);
+  here a machine lists `laptop` or `desktop` in ~/.config/mise/miserc.toml and
+  ONE template renders per-machine output:
+
+      [dotfiles]
+      "~/.ssh/config" = { source = "~/.dotfiles-mise/templates/ssh_config.tmpl", mode = "template" }
+
+  `mise_env` is an array in templates (verified 2026-07-19), so `in` works and
+  an {% else %} branch gives you the tag-default fallback for free.
+
+  This file is an .example on purpose: the real ~/.ssh/config lives in the
+  PRIVATE custom repo (D12), which is where host names, ports and key paths
+  belong. Declaring the entry here as well would collide across repos — mise's
+  sibling-config precedence is undefined (§2.2) and scripts/lint-config.py only
+  sees this repo.
+
+  Template mode renders on every apply and takes permissions from the source
+  file, so `chmod 600` the real template — ssh rejects a group-readable config.
+-#}
+Include ~/.ssh/config.d/*
+
+{% if "laptop" in mise_env %}
+# Laptop: roaming, so keep connections cheap to re-establish.
+Host *
+    ServerAliveInterval 30
+    AddKeysToAgent yes
+{% elif "desktop" in mise_env %}
+# Desktop: on a wired network, multiplex aggressively.
+Host *
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
+{% else %}
+# No device marker selected — the tag-default equivalent.
+Host *
+    AddKeysToAgent yes
+{% endif %}

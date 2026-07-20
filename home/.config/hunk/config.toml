@@ -1,0 +1,11 @@
+# hunk — review-first terminal diff viewer (https://github.com/modem-dev/hunk)
+theme = "catppuccin-mocha"
+mode = "auto"
+vcs = "git"
+watch = false
+exclude_untracked = false
+line_numbers = true
+wrap_lines = true
+menu_bar = true
+agent_notes = false
+transparent_background = false

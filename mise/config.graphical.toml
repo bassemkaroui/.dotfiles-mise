@@ -1,0 +1,14 @@
+# Profile: graphical — anything that needs a display. Replaces the old repo's
+# `.graphical-env` detection (auto-detect via $DISPLAY/$WAYLAND_DISPLAY with a
+# manual override file): a machine now opts in by listing `graphical` in
+# ~/.config/mise/miserc.toml.
+#
+# Phase 3b adds the install tasks (ghostty, obsidian) and setup:fonts;
+# Phase 4 adds the desktop-environment profiles (gnome, cosmic).
+
+[dotfiles]
+# Ghostty reads ~/.config/ghostty/config. `config.ghostty` is carried over from
+# the old repo unchanged — it holds the real settings while `config` is empty,
+# which predates this migration; see MIGRATION.md.
+"~/.config/ghostty/config" = { mode = "symlink" }
+"~/.config/ghostty/config.ghostty" = { mode = "symlink" }

@@ -1,0 +1,120 @@
+target-version = "py310"
+line-length = 100
+fix = true
+
+[lint]
+preview = true
+select = [
+	# flake8-2020
+	"YTT",
+	# flake8-bandit
+	"S",
+	# flake8-bugbear
+	"B",
+	# flake8-builtins
+	"A",
+	# flake8-comprehensions
+	"C4",
+	# flake8-debugger
+	"T10",
+	# flake8-simplify
+	"SIM",
+	# flake8-future-annotations
+	"FA",
+	# isort
+	"I",
+	# mccabe
+	"C90",
+	# pycodestyle
+	"E", "W",
+	# pyflakes
+	"F",
+	# pygrep-hooks
+	"PGH",
+	# pyupgrade
+	"UP",
+	# ruff
+	"RUF",
+	# tryceratops
+	"TRY",
+	# NumPy-specific rules
+	"NPY",
+	# pandas-vet
+	"PD",
+	# pep8-naming
+	"N",
+	# flake8-pytest-style
+	"PT",
+	# flake8-pie
+	"PIE",
+	# flake8-tidy-imports
+	"TID",
+	# flake8-implicit-str-concat
+	"ISC",
+	# Perflint
+	"PERF",
+	# flynt
+	"FLY",
+	# unconventional-import-alias
+	"ICN001",
+	# pylint
+	"PL",
+	# flake8-unused-arguments
+	"ARG",
+	# FastAPI
+	"FAST",
+]
+ignore = [
+	# LineTooLong
+	"E501",
+	# indentation-with-invalid-multiple
+	"E111",
+	# indentation-with-invalid-multiple-comment
+	"E114",
+	# over-indented
+	"E117",
+	# tab-indentation
+	"W191",
+	# too-many-public-methods
+	"PLR0904",
+	# Too many returns
+	"PLR0911",
+	# Too many branches
+	"PLR0912",
+	# Too many arguments to function call
+	"PLR0913",
+	# too-many-locals
+	"PLR0914",
+	# Too many statements
+	"PLR0915",
+	# too-many-boolean-expressions
+	"PLR0916",
+	# Too many positional arguments
+	"PLR0917",
+	# too-many-nested-blocks
+	"PLR1702",
+	# literal-membership
+	"PLR6201",
+	# Private name import
+	"PLC2701",
+	# compare-to-empty-string
+	"PLC1901",
+	# import-outside-toplevel
+	"PLC0415",
+	# unnecessary-dunder-call
+	"PLC2801",
+	# Global statements are discouraged
+	"PLW0603",
+	# unspecified-encoding
+	"PLW1514",
+	# raise-vanilla-args
+	"TRY003",
+
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[format]
+preview = true
+docstring-code-format = true

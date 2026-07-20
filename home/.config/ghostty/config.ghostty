@@ -1,0 +1,9 @@
+theme = Catppuccin Mocha
+font-size = 12
+quit-after-last-window-closed = false
+window-decoration = false
+mouse-hide-while-typing = true
+shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo,path
+# shell-integration-features = cursor,no-sudo,title,no-ssh-env,no-ssh-terminfo,path
+background-opacity = 0.95
+background-blur = true

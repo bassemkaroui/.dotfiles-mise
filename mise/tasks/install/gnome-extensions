@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+#MISE description="Install and enable GNOME Shell extensions from the manifest"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:gnome-extensions"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's install:gnome-extensions. The graphical/DE detection
+# blocks are gone — the `gnome` profile is the policy decision. What replaces
+# them is a capability probe: a machine can legitimately be *destined* for
+# GNOME while gnome-shell isn't installed yet (provisioning over SSH before the
+# first graphical login), and that must skip cleanly, not fail — a failing step
+# aborts the whole [tasks.bootstrap] chain.
+#
+# The manifest is user data and lives in the PRIVATE custom repo, which deploys
+# it to ~/.local/share/gnome-extensions/. No entry in this repo declares it.
+require_profile gnome
+
+MANIFEST="$HOME/.local/share/gnome-extensions/manifest.txt"
+SETTINGS="$HOME/.local/share/gnome-extensions/extension-settings.dconf"
+
+have gnome-shell gnome-extensions || skip "GNOME Shell is not installed on this machine"
+have curl jq || skip "curl and jq are required (jq is a core [tools] entry — is mise's env active?)"
+
+SHELL_VERSION="$(gnome-shell --version 2>/dev/null | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+[[ -n "$SHELL_VERSION" ]] || skip "Could not determine the GNOME Shell version"
+ok "GNOME Shell major version: $SHELL_VERSION"
+
+if [[ ! -f "$MANIFEST" ]]; then
+    warn "No extension manifest at $MANIFEST"
+    skip "It ships with the private custom repo — wire that up first (setup:custom-hookup)"
+fi
+
+# ─── Install what's missing ───────────────────────────────────────────────────
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+installed=0 present=0 failed=0
+
+while IFS= read -r uuid; do
+    [[ -z "$uuid" || "$uuid" == \#* ]] && continue
+
+    if gnome-extensions info "$uuid" &>/dev/null; then
+        ok "  $uuid (already installed)"
+        ((present++)) || true
+        continue
+    fi
+
+    info "  Installing $uuid ..."
+    api="$(curl -fsSL "https://extensions.gnome.org/extension-info/?uuid=$uuid&shell_version=$SHELL_VERSION" 2>/dev/null || true)"
+    if [[ -z "$api" ]]; then
+        warn "  $uuid: extensions.gnome.org did not answer (skipped)"
+        ((failed++)) || true
+        continue
+    fi
+
+    url="$(printf '%s' "$api" | jq -r '.download_url // empty' 2>/dev/null)"
+    if [[ -z "$url" ]]; then
+        warn "  $uuid: no build for GNOME Shell $SHELL_VERSION (skipped)"
+        ((failed++)) || true
+        continue
+    fi
+
+    zip="$tmp/${uuid}.zip"
+    if ! curl -fsSL -o "$zip" "https://extensions.gnome.org${url}"; then
+        warn "  $uuid: download failed (skipped)"
+        ((failed++)) || true
+        continue
+    fi
+
+    if gnome-extensions install --force "$zip"; then
+        ok_changed "  $uuid (installed)"
+        ((installed++)) || true
+    else
+        warn "  $uuid: gnome-extensions install failed (skipped)"
+        ((failed++)) || true
+    fi
+done <"$MANIFEST"
+
+# ─── Restore their settings ───────────────────────────────────────────────────
+
+if [[ ! -f "$SETTINGS" ]]; then
+    warn "No settings dump at $SETTINGS — extensions keep their defaults"
+elif ! have dconf; then
+    warn "dconf is not installed — cannot restore extension settings"
+elif [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    # dconf still exits 0 without a session bus, it just writes somewhere the
+    # running shell will never read. Say so rather than claim success.
+    warn "No DBUS session — skipping settings restore (re-run from a desktop session)"
+else
+    dconf load /org/gnome/shell/extensions/ <"$SETTINGS"
+    ok_changed "Extension settings restored from $SETTINGS"
+fi
+
+# ─── Enable them ──────────────────────────────────────────────────────────────
+
+enabled=0
+while IFS= read -r uuid; do
+    [[ -z "$uuid" || "$uuid" == \#* ]] && continue
+    gnome-extensions info "$uuid" &>/dev/null || continue
+
+    state="$(gnome-extensions info "$uuid" 2>/dev/null | grep -oP '(?<=State: ).*' || true)"
+    [[ "$state" == "ENABLED" || "$state" == "ACTIVE" ]] && continue
+
+    if gnome-extensions enable "$uuid" 2>/dev/null; then
+        ok_changed "  Enabled $uuid"
+        ((enabled++)) || true
+    fi
+done <"$MANIFEST"
+
+if ((enabled == 0)); then
+    ok "All installed extensions already enabled"
+fi
+
+info "Installed: $installed  Already present: $present  Failed: $failed"
+if ((installed > 0)); then
+    info "Restart GNOME Shell to load the new ones (Alt+F2 → r, or log out/in)"
+fi

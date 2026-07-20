@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+#MISE description="Delete cached COSMIC themes (interactive)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:cosmic-theme-clean"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's setup:cosmic-theme-clean. The cache is just downloaded
+# .ron files under ~/.local/share/cosmic-themes; deleting one only means the
+# next pick re-downloads it. Interactive, so never in [tasks.bootstrap].
+require_profile cosmic
+
+CACHE_DIR="$HOME/.local/share/cosmic-themes"
+[[ -t 0 ]] || skip "This task is interactive; run it from a terminal"
+
+RON_FILES=()
+NAMES=()
+shopt -s nullglob
+for ron in "$CACHE_DIR"/*.ron; do
+    RON_FILES+=("$ron")
+    NAMES+=("$(basename "$ron" .ron | tr '_' ' ')")
+done
+shopt -u nullglob
+
+if ((${#RON_FILES[@]} == 0)); then
+    ok "No cached themes in $CACHE_DIR"
+    exit 0
+fi
+
+printf '\n  Cached COSMIC themes:\n\n'
+for i in "${!NAMES[@]}"; do
+    printf '    %d) %s\n' "$((i + 1))" "${NAMES[$i]}"
+done
+printf '\n  Numbers to delete (space-separated), "all", or "cancel":\n  > '
+read -r INPUT
+
+if [[ -z "$INPUT" || "${INPUT,,}" == "cancel" ]]; then
+    info "Cancelled."
+    exit 0
+fi
+
+INDICES=()
+if [[ "${INPUT,,}" == "all" ]]; then
+    for i in "${!RON_FILES[@]}"; do INDICES+=("$i"); done
+else
+    for num in $INPUT; do
+        if ! [[ "$num" =~ ^[0-9]+$ ]] || ((num < 1 || num > ${#RON_FILES[@]})); then
+            warn "Not a valid entry number: $num (ignored)"
+            continue
+        fi
+        INDICES+=("$((num - 1))")
+    done
+fi
+
+if ((${#INDICES[@]} == 0)); then
+    info "Nothing to delete."
+    exit 0
+fi
+
+deleted=0
+for idx in "${INDICES[@]}"; do
+    file="${RON_FILES[$idx]}"
+    if [[ -f "$file" ]]; then
+        rm "$file"
+        ok_changed "Deleted: ${NAMES[$idx]}"
+        ((deleted++)) || true
+    fi
+done
+info "Deleted $deleted cached theme(s)"

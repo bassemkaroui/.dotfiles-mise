@@ -61,7 +61,10 @@ done < <(
     # ~/.claude and ~/.gnupg hold managed links too (per-file, D8). ~/.claude
     # matters most: commands/ is symlink-each, the mode where a per-file link is
     # left dangling the moment a source file is deleted from the repo.
-    for d in "$HOME/.config" "$HOME/.local/share" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.gnupg"; do
+    # ~/.themes holds the gnome profile's whole-dir theme links — the clearest
+    # case of the removal problem this task exists for: drop the profile and
+    # the links stay, pointing at a config file mise no longer loads.
+    for d in "$HOME/.config" "$HOME/.local/share" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.gnupg" "$HOME/.themes"; do
         # -path prune: ~/.local/share/mise is mise's whole tool tree (tens of
         # thousands of files, none of them ours) and ~/.claude/projects is
         # session history.

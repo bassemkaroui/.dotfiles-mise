@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#MISE description="Re-export the GNOME extensions manifest + settings into the custom repo"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="update:gnome-extensions"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's update:gnome-extensions. This is the *capture* half of
+# the pair: it writes what this machine currently has back through the deployed
+# symlink into whichever repo owns it (the private custom repo), and commits.
+#
+# It is NOT part of [tasks.bootstrap] — it mutates and commits another repo, so
+# it only ever runs when a human asks for it.
+require_profile gnome
+
+MANIFEST="$HOME/.local/share/gnome-extensions/manifest.txt"
+SETTINGS="$HOME/.local/share/gnome-extensions/extension-settings.dconf"
+
+# The OLD repos are the rollback path for this migration, and on a machine that
+# has not been cut over yet ~/.local/share/gnome-extensions is a live stow
+# symlink into ~/.dotfiles-custom. Writing through it — and worse, committing
+# there — would edit the very state the rollback depends on. Same refusal as
+# setup:repo-links, extended to the custom repo.
+OLD_REPOS=("${DOTFILES_OLD_REPO:-$HOME/.dotfiles}" "${DOTFILES_OLD_CUSTOM_REPO:-$HOME/.dotfiles-custom}")
+
+have gnome-shell gnome-extensions || skip "GNOME Shell is not installed on this machine"
+have dconf || skip "dconf is not installed — cannot dump extension settings"
+[[ -e "$MANIFEST" ]] || skip "No manifest at $MANIFEST — nothing to update (deploy the custom repo first)"
+
+MANIFEST_REAL="$(readlink -f "$MANIFEST")"
+SETTINGS_REAL="$(readlink -f "$SETTINGS")"
+
+for old in "${OLD_REPOS[@]}"; do
+    [[ -d "$old" ]] || continue
+    old_real="$(readlink -f "$old")"
+    if [[ "$MANIFEST_REAL" == "$old_real"/* || "$SETTINGS_REAL" == "$old_real"/* ]]; then
+        warn "$MANIFEST resolves into the old repo ($old) — refusing to write there"
+        skip "That repo is this migration's rollback path; cut over first (MIGRATION.md)"
+    fi
+done
+
+ok "Writing to $(dirname "$MANIFEST_REAL")/"
+
+# ─── Manifest ─────────────────────────────────────────────────────────────────
+
+old_manifest=""
+[[ -f "$MANIFEST_REAL" ]] && old_manifest="$(<"$MANIFEST_REAL")"
+
+gnome-extensions list --user | sort >"$MANIFEST_REAL"
+new_manifest="$(<"$MANIFEST_REAL")"
+
+if [[ "$old_manifest" == "$new_manifest" ]]; then
+    ok "manifest.txt unchanged"
+else
+    ok_changed "manifest.txt updated"
+    if [[ -n "$old_manifest" ]]; then
+        added="$(comm -13 <(printf '%s\n' "$old_manifest") <(printf '%s\n' "$new_manifest") || true)"
+        removed="$(comm -23 <(printf '%s\n' "$old_manifest") <(printf '%s\n' "$new_manifest") || true)"
+        [[ -n "$added" ]] && info "  Added: $(printf '%s' "$added" | tr '\n' ' ')"
+        [[ -n "$removed" ]] && info "  Removed: $(printf '%s' "$removed" | tr '\n' ' ')"
+    fi
+fi
+
+# ─── Settings ─────────────────────────────────────────────────────────────────
+
+old_settings=""
+[[ -f "$SETTINGS_REAL" ]] && old_settings="$(<"$SETTINGS_REAL")"
+
+dconf dump /org/gnome/shell/extensions/ >"$SETTINGS_REAL"
+
+if [[ "$old_settings" == "$(<"$SETTINGS_REAL")" ]]; then
+    ok "extension-settings.dconf unchanged"
+else
+    ok_changed "extension-settings.dconf updated"
+fi
+
+# ─── Commit, if the owning repo is a git repo ─────────────────────────────────
+#
+# The old task hardcoded the custom repo's stow layout (`git add
+# gnome_extensions/ .custom-packages`). Staging the two resolved paths instead
+# works whatever layout the v2 custom repo ends up with (Phase 6).
+
+git_root=""
+dir="$(dirname "$MANIFEST_REAL")"
+while [[ "$dir" != "/" ]]; do
+    if [[ -d "$dir/.git" ]]; then
+        git_root="$dir"
+        break
+    fi
+    dir="$(dirname "$dir")"
+done
+
+if [[ -z "$git_root" ]]; then
+    ok "$(dirname "$MANIFEST_REAL") is not in a git repo — nothing to commit"
+    exit 0
+fi
+
+if [[ -z "$(git -C "$git_root" status --porcelain -- "$MANIFEST_REAL" "$SETTINGS_REAL" 2>/dev/null)" ]]; then
+    ok "No changes to commit in $git_root"
+    exit 0
+fi
+
+git -C "$git_root" add -- "$MANIFEST_REAL" "$SETTINGS_REAL"
+git -C "$git_root" commit -m "gnome-extensions: update manifest and settings" >/dev/null \
+    || warn "git commit failed in $git_root (nothing staged, or a hook refused)"
+ok_changed "Committed the update in $git_root"

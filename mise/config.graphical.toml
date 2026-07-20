@@ -7,8 +7,9 @@
 # Phase 4 adds the desktop-environment profiles (gnome, cosmic).
 
 [dotfiles]
-# Ghostty reads ~/.config/ghostty/config. `config.ghostty` is carried over from
-# the old repo unchanged — it holds the real settings while `config` is empty,
-# which predates this migration; see MIGRATION.md.
+# Ghostty 1.3.1 loads BOTH ~/.config/ghostty/config and ~/.config/ghostty/
+# config.ghostty, the latter winning on conflicting keys (verified with
+# `ghostty +show-config`). The settings live in config.ghostty because the
+# extension gets it syntax highlighting; `config` is empty but canonical.
 "~/.config/ghostty/config" = { mode = "symlink" }
 "~/.config/ghostty/config.ghostty" = { mode = "symlink" }

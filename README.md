@@ -29,8 +29,9 @@ otherwise rather than half-deploy.
 4. Seeds the per-machine `~/.config/mise/miserc.toml` (profile selection) — pass
    `DOTFILES_PROFILES=graphical,ai,dev` or answer the prompt.
 5. Refuses to continue if any `[dotfiles]` target or `[bootstrap.repos]` path still resolves
-   into the old `~/.dotfiles` stow deployment (unstow it first — see
-   [MIGRATION.md](MIGRATION.md) step 3). Needs `python3`.
+   into the old `~/.dotfiles` **or `~/.dotfiles-custom`** stow deployment (unstow them first —
+   see [MIGRATION.md](MIGRATION.md) step 3). Needs `python3`; override with
+   `DOTFILES_OLD_REPO` / `DOTFILES_OLD_CUSTOM_REPO`.
 6. `mise trust`, moves conflicting real dotfile targets aside to `<file>.pre-mise.bak`
    (e.g. the stock `~/.bashrc` on a fresh account), then runs `mise bootstrap` with
    `MISE_GLOBAL_CONFIG_FILE` pointed at the repo — the one-time nudge mise needs before its

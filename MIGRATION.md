@@ -105,7 +105,10 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - `$MISE_ENV` invisible to hooks → all profile gating happens in tasks.
 - `--force-dotfiles` replaces without backup → cutover always unstows via the old repo first.
   `install.sh` additionally *refuses to run* while any `[dotfiles]` target or
-  `[bootstrap.repos]` path still resolves into `~/.dotfiles`, because the old repo deploys
+  `[bootstrap.repos]` path still resolves into `~/.dotfiles` **or `~/.dotfiles-custom`**
+  (the companion repo is deployed by the same stow run and is just as much part of the
+  rollback path — `~/.gitconfig`, `~/.ssh/config`, `~/.p10k.zsh` and the gnome-extensions
+  manifest all point into it), because the old repos deploy
   whole directories (`~/.config/bat`, `~/.config/tmux`, `~/.config/yazi`, …) as symlinks —
   applying through one of those would rewrite files inside the rollback path, and mise
   replaces a *symlink* without any conflict error (to mise a symlink is never data). The

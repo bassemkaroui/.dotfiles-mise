@@ -75,6 +75,7 @@ mise bootstrap status            # everything: packages, repos, dotfiles, shell,
 mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
+mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise bootstrap repos status      # cloned-repo drift
 mise run cleanup --dry-run       # find symlinks left behind by removed entries
 python3 scripts/lint-config.py   # config collision lint (CI wiring comes in Phase 5)

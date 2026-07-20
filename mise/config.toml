@@ -124,7 +124,9 @@ run = [
     { task = "setup:completions" },
     { task = "setup:git-signing" },
     { task = "setup:login-shell-fallback" },
-    # 4. Profile-gated installs. Each no-ops without its profile.
+    # 4. Asks at most once per machine, and only at a terminal (see the task).
+    { task = "setup:p10k-icon" },
+    # 5. Profile-gated installs. Each no-ops without its profile.
     { task = "setup:fonts" },
     { task = "install:ghostty" },
     { task = "install:obsidian" },

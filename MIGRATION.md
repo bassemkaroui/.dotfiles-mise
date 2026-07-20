@@ -20,7 +20,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | oh-my-tmux + nvim git **submodules** | `[bootstrap.repos]` (real clones at live paths) | 2 |
 | ~~`install:pathpicker`~~ ✅ | `[bootstrap.repos]` + `setup:repo-links` task | 2–3 |
 | ~~`setup:nodes-tools` (corepack enable)~~ ✅ | `post-tools` hook, guarded on `command -v corepack` | 3a |
-| `setup:p10k-icon` (writes `~/.p10k.local.zsh`) | still unported — `home/.zshrc` sources that file, so the overlay works; the icon-writing task itself | 5 |
+| ~~`setup:p10k-icon` (writes `~/.p10k.local.zsh`)~~ ✅ | ported, with a shortlist menu + `--icon`/`--show`/`--clear`; asks at most once per machine | 6 |
+| ~~Custom repo's `p10k/tag-desktop/.p10k.zsh`~~ ✅ | **dropped** — it differed from the shared config by exactly one line (the OS icon), which `setup:p10k-icon` now writes into the machine-local overlay. Removes the two-repos-one-key hazard | 6 |
 | `install:build-deps`, `install:nala`, zsh install | `[bootstrap.packages]` apt entries | 1 |
 | `install:media-tools` | `media` profile apt entries (ubi fallback dropped) | 2 |
 | chsh/usermod cascade (`setup:zsh` Phase 2) | `[bootstrap.user].login_shell` + NSS fallback task | 1, 3 |
@@ -83,11 +84,11 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   throwaway `XDG_CONFIG_HOME`s: `config.ghostty` alone works, `config` alone works, and with
   both present `config.ghostty` wins). The `.ghostty` extension is what gets the file syntax
   highlighting in editors. Both are ported verbatim.
-- **`~/.p10k.zsh` is declared by this repo AND by the custom repo** (`p10k/tag-desktop/`).
-  Same key in two repos means undefined precedence (§2.2 of the plan) and `lint-config.py`
-  only sees this one. Phase 6 must resolve it — either move the desktop delta into the
-  `~/.p10k.local.zsh` overlay (`home/.zshrc` already sources it) or capture per machine with
-  `mise dotfiles add ~/.p10k.zsh`. The same applies to any other key the custom repo shares.
+- ~~`~/.p10k.zsh` is declared by this repo AND by the custom repo~~ **RESOLVED**: the two
+  files differed by a single line, the OS icon. The companion repo drops its p10k package
+  entirely and `setup:p10k-icon` writes that line into `~/.p10k.local.zsh`, which
+  `home/.zshrc` sources after `~/.p10k.zsh`. Any *other* key the companion repo shares is
+  still caught by `lint-config.py --live`, which `install.sh` runs.
 
 ### Known mise limitations we compensate for
 - No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc. Renaming or deleting a

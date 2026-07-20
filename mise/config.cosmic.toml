@@ -1,0 +1,12 @@
+# Profile: cosmic — the COSMIC desktop (Pop!_OS). Replaces the old repo's
+# `.desktop-env` detection; a machine opts in by listing `cosmic` in
+# ~/.config/mise/miserc.toml. `cosmic` is documented as implying `graphical`.
+#
+# The theme itself is not a dotfile: COSMIC imports a .ron through
+# `cosmic-settings appearance import`, so `setup:cosmic-theme` stays a task.
+
+[bootstrap.packages]
+# ddcutil: external-monitor brightness control over DDC/CI. `setup:cosmic`
+# adds the i2c udev rule and group membership that make it usable non-root —
+# that part cannot be declared, so it stays in the task.
+"apt:ddcutil" = "latest"

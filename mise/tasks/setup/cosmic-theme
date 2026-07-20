@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+#MISE description="Pick and apply a COSMIC desktop theme from cosmic-themes.org (interactive)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:cosmic-theme"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+
+# Port of the old repo's setup:cosmic-theme, minus the is_cosmic() detection.
+# Deliberately NOT part of [tasks.bootstrap]: it is a menu, and a menu cannot
+# run in the bootstrap chain (stdin is not a terminal there). Run it by hand.
+require_profile cosmic
+
+HELPER="$LIB/cosmic_theme.py"
+CACHE_DIR="$HOME/.local/share/cosmic-themes"
+
+have python3 curl || skip "python3 and curl are required"
+have cosmic-settings || skip "cosmic-settings is not installed — is this really a COSMIC machine?"
+[[ -t 0 ]] || skip "This task is interactive; run it from a terminal"
+
+mkdir -p "$CACHE_DIR"
+
+PREDEFINED=(
+    "Catppuccin Macchiato Lavender"
+    "Catppuccin Mocha Sky"
+    "Catppuccin Macchiato Green"
+    "Catppuccin Frappé Flamingo"
+    "Tokyonight"
+)
+
+safe_name() { printf '%s' "$1" | tr ' ' '_' | tr -cd '[:alnum:]_-'; }
+
+# Prompt for a different name after a failed search. Sets THEME_NAME/RON_FILE/
+# DOWNLOAD_OUTPUT/DOWNLOAD_EXIT for the caller's retry loop; exits on abort.
+prompt_retry_or_abort() {
+    printf '\n    1) Try a different name\n    2) Abort\n\n  Choose [1-2]: '
+    read -r choice
+    if [[ "$choice" != "1" ]]; then
+        info "Aborted."
+        exit 0
+    fi
+    printf '  Enter a theme name to search: '
+    read -r THEME_NAME
+    [[ -n "$THEME_NAME" ]] || {
+        info "No theme name entered — nothing to do."
+        exit 0
+    }
+    RON_FILE="$CACHE_DIR/$(safe_name "$THEME_NAME").ron"
+    DOWNLOAD_OUTPUT="$(python3 "$HELPER" download "$THEME_NAME" "$RON_FILE" 2>&1)" \
+        && DOWNLOAD_EXIT=0 || DOWNLOAD_EXIT=$?
+}
+
+# ─── Choose ───────────────────────────────────────────────────────────────────
+
+declare -A PREDEFINED_SET
+for name in "${PREDEFINED[@]}"; do
+    PREDEFINED_SET["$(safe_name "$name" | tr '[:upper:]' '[:lower:]')"]=1
+done
+
+CACHED=()
+shopt -s nullglob
+for ron in "$CACHE_DIR"/*.ron; do
+    base="$(basename "$ron" .ron)"
+    if [[ -z "${PREDEFINED_SET["${base,,}"]:-}" ]]; then
+        CACHED+=("$(printf '%s' "$base" | tr '_' ' ')")
+    fi
+done
+shopt -u nullglob
+
+ALL=("${PREDEFINED[@]}" "${CACHED[@]}")
+printf '\n  Available COSMIC themes:\n\n'
+for i in "${!ALL[@]}"; do
+    if ((i >= ${#PREDEFINED[@]})); then
+        printf '    %d) %s  (cached)\n' "$((i + 1))" "${ALL[$i]}"
+    else
+        printf '    %d) %s\n' "$((i + 1))" "${ALL[$i]}"
+    fi
+done
+CUSTOM_NUM=$((${#ALL[@]} + 1))
+SKIP_NUM=$((CUSTOM_NUM + 1))
+printf '    %d) Search cosmic-themes.org for another theme\n' "$CUSTOM_NUM"
+printf '    %d) Skip (keep the current theme)\n\n' "$SKIP_NUM"
+printf '  Choose a theme [1-%d]: ' "$SKIP_NUM"
+read -r CHOICE
+
+if [[ -z "$CHOICE" || ! "$CHOICE" =~ ^[0-9]+$ ]]; then
+    info "No selection — keeping the current theme."
+    exit 0
+fi
+if ((CHOICE == SKIP_NUM)); then
+    info "Keeping the current theme."
+    exit 0
+fi
+
+if ((CHOICE >= 1 && CHOICE <= ${#ALL[@]})); then
+    THEME_NAME="${ALL[$((CHOICE - 1))]}"
+elif ((CHOICE == CUSTOM_NUM)); then
+    printf '  Enter a theme name to search: '
+    read -r THEME_NAME
+    [[ -n "$THEME_NAME" ]] || {
+        info "No theme name entered — nothing to do."
+        exit 0
+    }
+else
+    warn "Invalid choice — nothing to do."
+    exit 0
+fi
+ok "Selected: $THEME_NAME"
+
+# ─── Download ─────────────────────────────────────────────────────────────────
+#
+# cosmic_theme.py exit codes: 0 = exact match downloaded, 2 = no exact match
+# (stdout lists candidates as name|downloads), 3 = nothing found, 1 = API error.
+
+RON_FILE="$CACHE_DIR/$(safe_name "$THEME_NAME").ron"
+if [[ -f "$RON_FILE" ]]; then
+    ok "Using the cached theme: $RON_FILE"
+    MATCHED="$THEME_NAME"
+    DOWNLOAD_EXIT=-1
+else
+    DOWNLOAD_OUTPUT="$(python3 "$HELPER" download "$THEME_NAME" "$RON_FILE" 2>&1)" \
+        && DOWNLOAD_EXIT=0 || DOWNLOAD_EXIT=$?
+fi
+
+while true; do
+    if ((DOWNLOAD_EXIT == -1)); then
+        : # cached
+
+    elif ((DOWNLOAD_EXIT == 0)); then
+        MATCHED="$(printf '%s' "$DOWNLOAD_OUTPUT" | grep '^NAME=' | cut -d= -f2-)"
+        ok "Downloaded: $MATCHED ($(printf '%s' "$DOWNLOAD_OUTPUT" | grep '^DOWNLOADS=' | cut -d= -f2-) downloads)"
+
+    elif ((DOWNLOAD_EXIT == 2)); then
+        NAMES=()
+        COUNTS=()
+        while IFS='|' read -r n c; do
+            [[ -z "$n" ]] && continue
+            NAMES+=("$n")
+            COUNTS+=("$c")
+        done <<<"$DOWNLOAD_OUTPUT"
+
+        if ((${#NAMES[@]} == 0)); then
+            warn "No themes match '$THEME_NAME'."
+            prompt_retry_or_abort
+            continue
+        fi
+
+        info "No exact match for '$THEME_NAME'. Similar themes:"
+        printf '\n'
+        for i in "${!NAMES[@]}"; do
+            printf '    %d) %s (%s downloads)\n' "$((i + 1))" "${NAMES[$i]}" "${COUNTS[$i]}"
+        done
+        printf '    %d) Cancel\n\n  Pick a theme [1-%d]: ' "$((${#NAMES[@]} + 1))" "$((${#NAMES[@]} + 1))"
+        read -r PICK
+
+        if [[ -z "$PICK" || ! "$PICK" =~ ^[0-9]+$ ]] || ((PICK < 1 || PICK > ${#NAMES[@]})); then
+            info "Cancelled."
+            exit 0
+        fi
+
+        PICK_NAME="${NAMES[$((PICK - 1))]}"
+        RON_FILE="$CACHE_DIR/$(safe_name "$PICK_NAME").ron"
+        if [[ -f "$RON_FILE" ]]; then
+            ok "Using the cached theme: $RON_FILE"
+            MATCHED="$PICK_NAME"
+        else
+            DOWNLOAD_OUTPUT="$(python3 "$HELPER" download "$PICK_NAME" "$RON_FILE" 2>&1)" \
+                && DOWNLOAD_EXIT=0 || DOWNLOAD_EXIT=$?
+            ((DOWNLOAD_EXIT == 0)) || fail "Could not download '$PICK_NAME'"
+            MATCHED="$(printf '%s' "$DOWNLOAD_OUTPUT" | grep '^NAME=' | cut -d= -f2-)"
+            ok "Downloaded: $MATCHED"
+        fi
+
+    elif ((DOWNLOAD_EXIT == 3)); then
+        warn "No themes match '$THEME_NAME'."
+        prompt_retry_or_abort
+        continue
+
+    else
+        fail "cosmic-themes.org search failed: $DOWNLOAD_OUTPUT"
+    fi
+    break
+done
+
+ok "Theme saved to $RON_FILE"
+
+# ─── Apply ────────────────────────────────────────────────────────────────────
+
+if cosmic-settings appearance import "$RON_FILE" 2>/dev/null; then
+    ok_changed "Applied theme: $MATCHED"
+else
+    warn "cosmic-settings could not import it — try Settings → Appearance → Import"
+fi

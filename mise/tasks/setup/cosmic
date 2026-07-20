@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+#MISE description="COSMIC desktop prerequisites: i2c/ddcutil access for monitor brightness"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:cosmic"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's setup:cosmic, minus two things:
+#
+#   - the is_cosmic() DE detection (the `cosmic` profile is that decision), and
+#   - the ddcutil install, which is now "apt:ddcutil" in config.cosmic.toml.
+#
+# What is left is the part mise cannot declare: a udev rule, a group, and the
+# membership that lets ddcutil talk to /dev/i2c-* without root.
+#
+# The theme is NOT applied from here. The old task ended by invoking the
+# interactive picker, which cannot work inside [tasks.bootstrap] — stdin is not
+# a terminal there and /dev/tty is not even openable (verified). Run
+# `mise run setup:cosmic-theme` when you want to change it.
+require_profile cosmic
+
+if ! have ddcutil; then
+    # It is a [bootstrap.packages] entry, so this only happens when the apt
+    # step was skipped or failed.
+    skip "ddcutil is not installed — check 'mise bootstrap packages status'"
+fi
+ok "ddcutil available: $(ddcutil --version 2>/dev/null | head -1)"
+
+if ! sudo_ok; then
+    warn "The i2c udev rule and group need root, and sudo would prompt for a password"
+    skip "Run 'mise run setup:cosmic' from an interactive shell to finish this"
+fi
+
+# ─── udev rule ────────────────────────────────────────────────────────────────
+
+UDEV_RULE="/etc/udev/rules.d/45-ddcutil-i2c.rules"
+udev_changed=false
+
+if [[ -f "$UDEV_RULE" ]]; then
+    ok "udev rule already present: $UDEV_RULE"
+else
+    SHIPPED="/usr/share/ddcutil/data/45-ddcutil-i2c.rules"
+    if [[ -f "$SHIPPED" ]]; then
+        sudo -n cp "$SHIPPED" "$UDEV_RULE"
+        ok_changed "udev rule installed from $SHIPPED"
+    else
+        printf 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"\n' | sudo -n tee "$UDEV_RULE" >/dev/null
+        ok_changed "udev rule created at $UDEV_RULE"
+    fi
+    udev_changed=true
+fi
+
+# ─── i2c group + membership ───────────────────────────────────────────────────
+
+USER="${USER:-$(id -un)}"
+
+if getent group i2c &>/dev/null; then
+    ok "i2c group exists"
+else
+    sudo -n groupadd i2c
+    ok_changed "Created the i2c group"
+fi
+
+if id -nG "$USER" | grep -qw i2c; then
+    ok "$USER is already in the i2c group"
+else
+    sudo -n usermod -aG i2c "$USER"
+    ok_changed "Added $USER to the i2c group (log out and back in for it to take effect)"
+fi
+
+if [[ "$udev_changed" == true ]]; then
+    sudo -n udevadm control --reload-rules
+    sudo -n udevadm trigger
+    ok_changed "Reloaded udev rules"
+fi

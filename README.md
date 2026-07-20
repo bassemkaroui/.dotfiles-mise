@@ -14,6 +14,10 @@ git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise
 ~/.dotfiles-mise/install.sh
 ```
 
+The clone must live at `~/.dotfiles-mise` and use the default `~/.config` —
+`mise/config.toml` names both paths literally, and `install.sh` refuses to run
+otherwise rather than half-deploy.
+
 `install.sh` does, in order:
 
 1. Installs mise if missing (`curl https://mise.run | sh`).
@@ -81,6 +85,7 @@ install.sh        bootstrap entry point (the only imperative pre-mise step)
 mise/             config.toml + config.<profile>.toml + tasks/ — linked file-by-file
                   into ~/.config/mise/, which stays a real directory
 home/             dotfiles.root — mirrors $HOME, deployed via [dotfiles]
+templates/        template-mode sources ({% if "laptop" in mise_env %}…)
 sandbox/          fake-$HOME verification harness
 scripts/          config collision lint
 docs/upstream/    vendored mise docs (gitignored; docs/fetch.sh refreshes)

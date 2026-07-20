@@ -20,9 +20,11 @@ config.toml; no other file may declare a ~/.config/mise/** dotfiles target.
 Modes:
   (default)  lint the repo's tracked config files
   --live     lint the machine-local config in ~/.config/mise (config*.toml and
-             conf.d/*.toml). A single broken drop-in there aborts every
-             `mise dotfiles apply`, and those files are outside the repo, so
-             install.sh runs this pass too.
+             conf.d/*.toml) *against* the repo's keys, so a drop-in can't
+             silently collide with core. Also checks that [dotfiles] sources
+             exist — a single missing source aborts every `mise dotfiles
+             apply`. install.sh runs this pass because those files live outside
+             the repo and CI never sees them.
 
 Exit 0 when clean, 1 with a report when collisions or violations exist.
 """
@@ -33,7 +35,7 @@ import os
 import sys
 import tomllib
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 MISE_DIR = os.path.join(REPO, "mise")
 
 NAMESPACES = ["dotfiles", "bootstrap.repos", "bootstrap.packages", "tools", "vars", "tasks"]
@@ -70,12 +72,49 @@ def extract(ns: str, data: dict) -> dict:
     return cur if isinstance(cur, dict) else {}
 
 
+def is_self_managed_key(key: str) -> bool:
+    """Any [dotfiles] target that writes into mise's own config directory."""
+    stripped = key.rstrip("/")
+    return stripped == "~/.config/mise" or key.startswith("~/.config/mise/")
+
+
+def check_self_managed(path: str, rel: str, data: dict, problems: list[str]) -> None:
+    """D9a — only config.toml may manage ~/.config/mise/** targets."""
+    for key in extract("dotfiles", data):
+        if not is_self_managed_key(key):
+            continue
+        if os.path.basename(path) != SELF_MANAGED_OWNER or os.path.realpath(
+            os.path.dirname(path)
+        ) != os.path.realpath(MISE_DIR):
+            problems.append(
+                f"D9a: [dotfiles] {key!r} in {rel} — only the repo's {SELF_MANAGED_OWNER} may "
+                f"manage ~/.config/mise/** targets"
+            )
+        elif key not in SELF_MANAGED_KEYS:
+            problems.append(
+                f"D9a: [dotfiles] {key!r} in {rel} is an unexpected ~/.config/mise/** "
+                f"target (expected exactly {sorted(SELF_MANAGED_KEYS)})"
+            )
+
+
+def check_sources(rel: str, data: dict, problems: list[str]) -> None:
+    """A [dotfiles] entry whose source is missing aborts the whole apply."""
+    for key, value in extract("dotfiles", data).items():
+        if not isinstance(value, dict):
+            continue
+        source = value.get("source")
+        if not isinstance(source, str) or any(c in source for c in "*?["):
+            continue  # globs are resolved by mise; nothing to stat here
+        if not os.path.exists(os.path.expanduser(source)):
+            problems.append(f"MISSING SOURCE: [dotfiles] {key!r} in {rel} -> {source}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--live",
         action="store_true",
-        help="lint machine-local config in ~/.config/mise instead of the repo",
+        help="lint machine-local config in ~/.config/mise against the repo's keys",
     )
     args = parser.parse_args()
 
@@ -84,6 +123,17 @@ def main() -> int:
 
     seen: dict[tuple[str, str], str] = {}
     problems: list[str] = []
+
+    # In live mode the repo's keys are the baseline a drop-in must not collide
+    # with, so load them first (without reporting collisions among themselves —
+    # the default mode owns that).
+    if args.live:
+        for path in repo_config_files():
+            rel = os.path.relpath(path, REPO)
+            data = _load(path)
+            for ns in NAMESPACES:
+                for key in extract(ns, data):
+                    seen.setdefault((ns, key), rel)
 
     for path in files:
         rel = os.path.relpath(path, REPO) if not args.live else path
@@ -107,35 +157,35 @@ def main() -> int:
                 else:
                     seen[ident] = rel
 
-        # D9a — self-management entries are config.toml's alone.
-        if not args.live:
-            for key in extract("dotfiles", data):
-                if not key.startswith("~/.config/mise/"):
-                    continue
-                if os.path.basename(path) != SELF_MANAGED_OWNER:
-                    problems.append(
-                        f"D9a: [dotfiles] {key!r} in {rel} — only {SELF_MANAGED_OWNER} may "
-                        f"manage ~/.config/mise/** targets"
-                    )
-                elif key not in SELF_MANAGED_KEYS:
-                    problems.append(
-                        f"D9a: [dotfiles] {key!r} in {rel} is an unexpected ~/.config/mise/** "
-                        f"target (expected exactly {sorted(SELF_MANAGED_KEYS)})"
-                    )
+        # D9a applies in both modes — machine-local drop-ins are the least
+        # reviewed files on the box, so they get the same check.
+        check_self_managed(path, rel, data, problems)
+        if args.live:
+            check_sources(rel, data, problems)
 
     if not args.live:
-        declared = {
-            k
-            for path in files
-            if os.path.basename(path) == SELF_MANAGED_OWNER
-            for k in extract("dotfiles", _load(path))
-            if k.startswith("~/.config/mise/")
-        }
-        for missing in SELF_MANAGED_KEYS - declared:
-            problems.append(
-                f"D9a: config.toml is missing the self-management entry {missing!r} — "
-                f"without it the repo's config never links into ~/.config/mise"
-            )
+        core = os.path.join(MISE_DIR, SELF_MANAGED_OWNER)
+        core_data = _load(core)
+        entries = extract("dotfiles", core_data)
+        declared = {k for k in entries if is_self_managed_key(k)}
+        # Don't pile "missing entry" noise on top of a parse error we already
+        # reported for the same file.
+        if core_data or not any(p.startswith("PARSE ERROR") for p in problems):
+            for missing in SELF_MANAGED_KEYS - declared:
+                problems.append(
+                    f"D9a: {SELF_MANAGED_OWNER} is missing the self-management entry "
+                    f"{missing!r} — without it the repo's config never links into "
+                    f"~/.config/mise"
+                )
+        for key in declared:
+            value = entries.get(key)
+            source = value.get("source") if isinstance(value, dict) else value
+            if not isinstance(source, str) or not source.startswith(("~/", "/")):
+                problems.append(
+                    f"D9a: [dotfiles] {key!r} needs an absolute source (~/... or /...); "
+                    f"a relative one resolves against ~/.config/mise once linked, making "
+                    f"the entry self-referential. Got: {source!r}"
+                )
 
     for p in problems:
         print(p)

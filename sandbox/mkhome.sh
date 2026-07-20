@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build a throwaway $HOME and run mise bootstrap checks against this repo
-# WITHOUT touching the real home directory.
+# Build a throwaway $HOME and run mise commands against this repo WITHOUT
+# touching the real home directory or writing anything into the repo.
 #
 # Usage:
 #   sandbox/mkhome.sh [--keep] [--profiles "graphical,ai,dev"] [--] [mise args...]
@@ -8,7 +8,12 @@
 # Default action is `mise bootstrap status`; pass extra args to run something
 # else, e.g.:
 #   sandbox/mkhome.sh -- dotfiles apply --dry-run
-#   PROFILES=graphical,gnome sandbox/mkhome.sh -- bootstrap --only dotfiles --dry-run
+#   sandbox/mkhome.sh --profiles graphical,gnome -- bootstrap --only dotfiles --dry-run
+#
+# The sandbox mirrors the real first-run flow: ~/.config/mise is a real
+# directory holding a machine-local miserc.toml, and mise is pointed at the
+# repo's config with MISE_GLOBAL_CONFIG_FILE (which is what install.sh does
+# before the config links exist).
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,9 +22,18 @@ KEEP=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --keep) KEEP=1; shift ;;
-        --profiles) PROFILES="$2"; shift 2 ;;
-        --) shift; break ;;
+        --keep)
+            KEEP=1
+            shift
+            ;;
+        --profiles)
+            PROFILES="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
         *) break ;;
     esac
 done
@@ -32,29 +46,35 @@ export XDG_CONFIG_HOME="$HOME/.config"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_STATE_HOME="$HOME/.local/state"
 export XDG_CACHE_HOME="$HOME/.cache"
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+mkdir -p "$XDG_CONFIG_HOME/mise" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
-# The repo's config declares dotfiles.root under ~/.dotfiles-mise, so mirror
-# the repo into the sandbox home at the same relative location via symlink.
+# The repo's config uses ~/.dotfiles-mise paths (dotfiles.root and the
+# self-management sources), so expose it there inside the sandbox.
 ln -s "$REPO" "$HOME/.dotfiles-mise"
-ln -s "$HOME/.dotfiles-mise/mise" "$XDG_CONFIG_HOME/mise"
 
-if [[ -n "$PROFILES" ]]; then
-    printf 'env = [%s]\n' "$(printf '"%s", ' ${PROFILES//,/ } | sed 's/, $//')" \
-        > "$XDG_CONFIG_HOME/mise/miserc.toml.sandbox"
-    # miserc.toml lives inside the (symlinked) repo mise/ dir and is gitignored;
-    # never clobber a real one the developer machine may have.
-    if [[ -e "$XDG_CONFIG_HOME/mise/miserc.toml" ]]; then
-        echo "WARN: mise/miserc.toml already exists in repo — sandbox uses it as-is" >&2
-        rm -f "$XDG_CONFIG_HOME/mise/miserc.toml.sandbox"
+# Machine-local profile selection — written into the sandbox, never the repo.
+{
+    echo "# sandbox miserc"
+    if [[ -n "$PROFILES" ]]; then
+        printf 'env = ['
+        first=1
+        for p in ${PROFILES//,/ }; do
+            [[ $first -eq 1 ]] || printf ', '
+            printf '"%s"' "$p"
+            first=0
+        done
+        printf ']\n'
     else
-        mv "$XDG_CONFIG_HOME/mise/miserc.toml.sandbox" "$XDG_CONFIG_HOME/mise/miserc.toml"
-        trap 'rm -f "'"$REPO"'/mise/miserc.toml"; [[ '"$KEEP"' -eq 1 ]] || rm -rf "'"$SANDBOX"'"' EXIT
+        echo 'env = []'
     fi
-fi
+} >"$XDG_CONFIG_HOME/mise/miserc.toml"
+
+# Before the config links exist, point mise at the repo config directly — the
+# same mechanism install.sh uses on a first run.
+export MISE_GLOBAL_CONFIG_FILE="$REPO/mise/config.toml"
 
 cd "$HOME"
-mise trust "$XDG_CONFIG_HOME/mise/config.toml" >/dev/null 2>&1 || true
+mise trust "$REPO/mise/config.toml" >/dev/null 2>&1 || true
 
 echo "── sandbox HOME: $HOME (keep=$KEEP, profiles=${PROFILES:-none}) ──" >&2
 if [[ $# -gt 0 ]]; then

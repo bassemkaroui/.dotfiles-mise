@@ -5,8 +5,12 @@
 #   git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise
 #   ~/.dotfiles-mise/install.sh
 #
+# Also the supported upgrade path for machines running an older layout — it
+# converts ~/.config/mise, fixes up trust, and backs up conflicting files, none
+# of which a bare `mise bootstrap` would do.
+#
 # Env:
-#   DOTFILES_PROFILES=graphical,ai,dev   seed mise/miserc.toml non-interactively
+#   DOTFILES_PROFILES=graphical,ai,dev   seed ~/.config/mise/miserc.toml non-interactively
 #   DOTFILES_NONINTERACTIVE=1            never prompt; safe defaults
 #   MISE_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN   GitHub API token (see step 2)
 set -euo pipefail
@@ -77,25 +81,67 @@ else
     ok "GitHub token already set (\$MISE_GITHUB_TOKEN)"
 fi
 
-# ── 3. ~/.config/mise → repo symlink ──────────────────────────────────────────
+# ── 3. Prepare ~/.config/mise as a REAL directory ─────────────────────────────
+# mise's own config is self-managed: mise/config.toml declares [dotfiles]
+# entries that link config*.toml and tasks/ into ~/.config/mise. That directory
+# must stay real so machine-local state (miserc.toml, conf.d/ drop-ins) lives
+# outside the repo. Two legacy shapes need converting first.
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
-if [[ -L "$CONF" && "$(readlink -f "$CONF")" == "$(readlink -f "$REPO/mise")" ]]; then
-    # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
-    ok "~/.config/mise already points at the repo"
-else
-    # -L catches broken/foreign symlinks that -e alone would miss
-    if [[ -e "$CONF" || -L "$CONF" ]]; then
+mkdir -p "$(dirname "$CONF")"
+
+if [[ -L "$CONF" ]]; then
+    LINK_TARGET="$(readlink -f "$CONF" || true)"
+    if [[ "$LINK_TARGET" == "$(readlink -f "$REPO/mise")" ]]; then
+        # Machines that ran an earlier install.sh: whole-dir symlink into the
+        # repo. Convert in place, rescuing the machine-local files that used to
+        # live (gitignored) inside the repo.
+        info "Converting legacy ~/.config/mise dir symlink into a real directory"
+        rm "$CONF"
+        mkdir -p "$CONF"
+        shopt -s nullglob dotglob
+        for f in "$REPO/mise/miserc.toml" "$REPO"/mise/config*.local.toml; do
+            [[ -f "$f" ]] || continue
+            mv "$f" "$CONF/"
+            ok "Moved machine-local $(basename "$f") out of the repo into ~/.config/mise/"
+        done
+        if [[ -d "$REPO/mise/conf.d" ]]; then
+            mkdir -p "$CONF/conf.d"
+            for f in "$REPO"/mise/conf.d/*.toml; do
+                [[ -f "$f" ]] || continue
+                mv "$f" "$CONF/conf.d/"
+                ok "Moved machine-local conf.d/$(basename "$f") out of the repo"
+            done
+            # conf.d has no place in the repo any more; only remove it if the
+            # moves emptied it, so nothing unexpected is ever discarded.
+            rmdir "$REPO/mise/conf.d" 2>/dev/null || warn "$REPO/mise/conf.d not empty — left in place"
+        fi
+        shopt -u nullglob dotglob
+    else
         BAK="$CONF.bak.$(date +%Y%m%d%H%M%S)"
-        warn "Backing up existing $CONF -> $BAK"
+        # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+        warn "~/.config/mise is a symlink elsewhere ($LINK_TARGET) — backing up to $BAK"
         mv "$CONF" "$BAK"
+        mkdir -p "$CONF"
     fi
-    mkdir -p "$(dirname "$CONF")"
-    ln -s "$REPO/mise" "$CONF"
-    ok "Symlinked ~/.config/mise -> $REPO/mise"
+else
+    mkdir -p "$CONF"
+    # A pre-existing real global config would (a) make the first dotfiles apply
+    # refuse the conflict and (b) error as untrusted once MISE_GLOBAL_CONFIG_FILE
+    # points at the repo. Move it aside before either can happen.
+    shopt -s nullglob
+    for f in "$CONF"/config*.toml; do
+        [[ -f "$f" && ! -L "$f" ]] || continue
+        bak="$f.pre-mise.bak"
+        n=1
+        while [[ -e "$bak" ]]; do bak="$f.pre-mise.bak$((n++))"; done
+        warn "Backing up pre-existing $(basename "$f") -> $(basename "$bak")"
+        mv "$f" "$bak"
+    done
+    shopt -u nullglob
 fi
 
-# ── 4. Per-machine profile selection (miserc.toml) ────────────────────────────
-MISERC="$REPO/mise/miserc.toml"
+# ── 4. Per-machine profile selection (miserc.toml, machine-local) ─────────────
+MISERC="$CONF/miserc.toml"
 if [[ -f "$MISERC" ]]; then
     ok "mise/miserc.toml already present: $(grep -E '^env' "$MISERC" || echo '(no env line)')"
 else
@@ -126,7 +172,7 @@ else
             echo 'env = []'
         fi
     } >"$MISERC"
-    ok "Wrote mise/miserc.toml (profiles: ${selected[*]:-none})"
+    ok "Wrote ~/.config/mise/miserc.toml (profiles: ${selected[*]:-none})"
 fi
 
 # ── 5. Validate config before handing over to mise ────────────────────────────
@@ -135,22 +181,54 @@ if command -v python3 &>/dev/null; then
         warn "Config collision lint failed — fix before bootstrapping."
         exit 1
     }
+    # Machine-local drop-ins live outside the repo now; a single broken one
+    # aborts every dotfiles apply, so check them too.
+    python3 "$REPO/scripts/lint-config.py" --live || {
+        warn "Machine-local mise config under $CONF failed the lint — fix before bootstrapping."
+        exit 1
+    }
 else
     warn "python3 not found — skipping config collision lint"
 fi
 
 # ── 6. Trust + back up conflicting dotfile targets ────────────────────────────
 mise trust "$REPO/mise/config.toml" >/dev/null
+# Pointing MISE_GLOBAL_CONFIG_FILE at the repo (below) demotes the files in
+# ~/.config/mise out of the implicit trust the global config dir normally
+# enjoys, so a machine-local config.local.toml / conf.d drop-in would error as
+# untrusted and take every later mise call with it. Trusting the directory is
+# NOT enough — each file needs it (verified on 2026.7.7).
+shopt -s nullglob
+for f in "$CONF"/config*.toml "$CONF"/conf.d/*.toml; do
+    [[ -f "$f" ]] || continue
+    mise trust "$f" >/dev/null 2>&1 || true
+done
+shopt -u nullglob
+# On a first run the repo config isn't linked into ~/.config/mise yet, so mise
+# only sees the [dotfiles] set when pointed at it explicitly — without this the
+# probe below silently finds nothing to back up.
+export MISE_GLOBAL_CONFIG_FILE="$REPO/mise/config.toml"
 # mise refuses to replace existing real files (and --force would replace them
-# WITHOUT backup), so move aside any symlink-mode target that exists and
-# differs — e.g. the skel ~/.bashrc on a fresh account, or files restored from
-# stow backups during a cutover from the old repo.
+# WITHOUT backup — on the self-managed config entries it would even overwrite
+# the repo's own files with symlink loops), so move aside any symlink-mode
+# target that exists and differs: the skel ~/.bashrc on a fresh account, or
+# files restored from stow backups during a cutover from the old repo.
 cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
 if command -v python3 &>/dev/null; then
-    mise dotfiles status --json 2>/dev/null |
+    # `|| true`: a status failure must not kill the script via pipefail — the
+    # backup pass is best-effort, and bootstrap below reports the real problem.
+    { mise dotfiles status --json 2>/dev/null || true; } |
         python3 -c '
 import json, sys
-data = json.load(sys.stdin)
+raw = sys.stdin.read().strip()
+if not raw:
+    # mise refused to report (e.g. an untrusted or broken config): skip the
+    # backup pass rather than crashing — bootstrap will surface the real error.
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
 for f in data.get("files", []):
     if f.get("mode") == "symlink" and f.get("state") == "differs":
         print(f["target"])
@@ -167,9 +245,19 @@ for f in data.get("files", []):
 fi
 
 # ── 7. Bootstrap ──────────────────────────────────────────────────────────────
+# Still running with MISE_GLOBAL_CONFIG_FILE pointed at the repo (set above), so
+# this works even before the config links exist. The dotfiles step creates them;
+# every later `mise bootstrap` / `mise dotfiles apply` needs neither the env var
+# nor a particular working directory.
 info "Running mise bootstrap..."
 if [[ "$NONINTERACTIVE" == "1" ]]; then
     mise bootstrap --yes
 else
     mise bootstrap
 fi
+
+echo
+ok "Done. Day-to-day from any directory:"
+echo "    mise bootstrap status      # what's missing"
+echo "    mise bootstrap --yes       # converge after editing config or profiles"
+echo "    \$EDITOR $MISERC   # change this machine's profiles"

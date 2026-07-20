@@ -1,9 +1,12 @@
-# ── Per-machine state (lives inside mise/ because ~/.config/mise symlinks there) ──
+# ── Per-machine state ─────────────────────────────────────────────────────────
+# Machine-local mise config (miserc.toml, conf.d/ drop-ins) lives in the REAL
+# ~/.config/mise directory, not in this repo — see mise/config.toml's
+# self-management entries. These patterns only catch stragglers from the older
+# whole-dir-symlink layout, or a local override someone drops in by hand.
 /mise/miserc.toml*
 /mise/config.local.toml
 /mise/config.*.local.toml
-/mise/conf.d/*
-!/mise/conf.d/.gitkeep
+/mise/conf.d/
 
 # ── Vendored upstream docs (refresh with docs/fetch.sh) ──
 /docs/upstream/

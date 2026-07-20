@@ -20,12 +20,18 @@ git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise
 2. Resolves a GitHub token (`$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` → `$GH_TOKEN` →
    `gh auth token`) and exports it — required because installing `[tools]` hits the GitHub
    releases API, which rate-limits unauthenticated callers to 60 req/hr.
-3. Backs up any existing `~/.config/mise` (real dir or foreign symlink) and symlinks it →
-   `~/.dotfiles-mise/mise`.
-4. Seeds the per-machine `mise/miserc.toml` (profile selection) from
-   `mise/miserc.example.toml` — pass `DOTFILES_PROFILES=graphical,ai,dev` or answer the prompt.
+3. Prepares `~/.config/mise` as a real directory (converting a legacy whole-dir symlink, or
+   backing up a pre-existing global config).
+4. Seeds the per-machine `~/.config/mise/miserc.toml` (profile selection) — pass
+   `DOTFILES_PROFILES=graphical,ai,dev` or answer the prompt.
 5. `mise trust`, moves conflicting real dotfile targets aside to `<file>.pre-mise.bak`
-   (e.g. the stock `~/.bashrc` on a fresh account), then `mise bootstrap --yes`.
+   (e.g. the stock `~/.bashrc` on a fresh account), then runs `mise bootstrap` with
+   `MISE_GLOBAL_CONFIG_FILE` pointed at the repo — the one-time nudge mise needs before its
+   own config is linked into place.
+
+Afterwards `mise bootstrap` and `mise dotfiles apply` work from **any** directory with no
+environment variables: `mise/config.toml` manages itself and its profile siblings into
+`~/.config/mise/` (see "Design rules").
 
 Re-running any of it is safe — everything converges.
 
@@ -62,7 +68,9 @@ mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
 mise bootstrap repos status      # cloned-repo drift
+mise run cleanup --dry-run       # find symlinks left behind by removed entries
 python3 scripts/lint-config.py   # config collision lint (CI wiring comes in Phase 5)
+python3 scripts/lint-config.py --live   # same, for machine-local ~/.config/mise files
 sandbox/mkhome.sh                # run bootstrap checks against a throwaway $HOME
 ```
 
@@ -70,13 +78,17 @@ sandbox/mkhome.sh                # run bootstrap checks against a throwaway $HOM
 
 ```
 install.sh        bootstrap entry point (the only imperative pre-mise step)
-mise/             becomes ~/.config/mise (dir symlink): config.toml + config.<profile>.toml
-                  + tasks/ ; miserc.toml & conf.d/ are per-machine (gitignored)
+mise/             config.toml + config.<profile>.toml + tasks/ — linked file-by-file
+                  into ~/.config/mise/, which stays a real directory
 home/             dotfiles.root — mirrors $HOME, deployed via [dotfiles]
-templates/        template-mode sources ({% if "laptop" in mise_env %}…)
 sandbox/          fake-$HOME verification harness
+scripts/          config collision lint
 docs/upstream/    vendored mise docs (gitignored; docs/fetch.sh refreshes)
 ```
+
+Per-machine state lives **outside** the repo, in the real `~/.config/mise/`:
+`miserc.toml` (this machine's profiles), `conf.d/*.toml` (local drop-ins), and
+`config.local.toml` if you want one. Nothing machine-specific is ever committed.
 
 ## Design rules (enforced, not aspirational)
 
@@ -87,3 +99,12 @@ docs/upstream/    vendored mise docs (gitignored; docs/fetch.sh refreshes)
   profile-gated logic lives in tasks, which do see it.
 - **Sensitive dirs are never whole-dir symlinks** (`~/.gnupg`, `~/.config/gh`, `~/.claude`,
   `~/.ssh`) so live tokens/keys can't land in the repo tree.
+- **mise's own config is self-managed.** `mise/config.toml` declares two `[dotfiles]` entries
+  (absolute sources, `config*.toml` glob + `tasks`) that link the repo's config into
+  `~/.config/mise/`. Adding a profile file and running `mise dotfiles apply` from anywhere
+  links it. Removing one leaves a dangling link that mise reports nowhere — that's what
+  `mise run cleanup` is for.
+- **Never run `mise dotfiles apply --force` / `mise bootstrap --force-dotfiles`.** mise
+  suggests it when it hits a conflict, but on the self-management entries it would overwrite
+  the repo's own config files with symlink loops and silently drop the global config. Resolve
+  conflicts by moving the offending file aside (which `install.sh` does for you).

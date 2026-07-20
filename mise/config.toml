@@ -1,7 +1,13 @@
-# Core mise config — deployed as ~/.config/mise/config.toml via the install.sh
-# dir symlink. This file owns ALL structure shared by every machine; profile
-# files (config.<profile>.toml) only ADD capability and never redeclare a key
-# that exists here (enforced by scripts/lint-config.py).
+# Core mise config — self-managed: the [dotfiles] entries below link this file
+# and its profile siblings into ~/.config/mise/, which stays a REAL directory so
+# per-machine state (miserc.toml, conf.d/ drop-ins) lives outside the repo.
+# install.sh breaks the chicken-and-egg on a first run with
+#   MISE_GLOBAL_CONFIG_FILE=~/.dotfiles-mise/mise/config.toml mise bootstrap
+# after which plain `mise bootstrap` / `mise dotfiles apply` work from any cwd.
+#
+# This file owns ALL structure shared by every machine; profile files
+# (config.<profile>.toml) only ADD capability and never redeclare a key that
+# exists here (enforced by scripts/lint-config.py).
 
 [settings]
 activate_aggressive = true
@@ -84,6 +90,14 @@ login_shell = "/usr/bin/zsh"
 # Sourceless entries mirror the target path under dotfiles.root (home/).
 # ~/.config/completions is NOT managed: .zshrc creates it and generates into it.
 [dotfiles]
+# mise's own config (D1a). Sources MUST be absolute (~/... counts): a relative
+# source would resolve against the declaring file's directory, which after
+# linking is ~/.config/mise — i.e. self-referential entries that never pick up
+# repo changes. The glob is config*.toml, not *.toml, so miserc.example.toml
+# isn't linked. No other config file may declare a ~/.config/mise/** target.
+"~/.config/mise/config*.toml" = { source = "~/.dotfiles-mise/mise/config*.toml", mode = "symlink" }
+"~/.config/mise/tasks" = { source = "~/.dotfiles-mise/mise/tasks", mode = "symlink" }
+
 "~/.zshrc" = { mode = "symlink" }
 "~/.zshenv" = { mode = "symlink" }
 "~/.zprofile" = { mode = "symlink" }

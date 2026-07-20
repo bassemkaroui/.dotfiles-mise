@@ -10,7 +10,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | Stow packages `bash zsh p10k` | `[dotfiles]` core entries | 1 |
 | Stow packages `fzf bat tmux gh gh-dash claude ghostty ruff hunk gpg yazi nvim` | `[dotfiles]` core/profile entries | 2 |
 | Stow package `gnome_themes` (+DE auto-exclude) | `gnome` profile `[dotfiles]` | 4 |
-| Stow package `mise` (nested stow) | `install.sh` dir symlink `~/.config/mise` | 0 |
+| Stow package `mise` (nested stow) | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
 | conf.d tool groups (`runtime cli dev ai yazi neovim`) | core `[tools]` + profile files | 1–2 |
 | `.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + `setup:{device-tag,exclude,mise-conf-exclude,install-exclude}` | `mise/miserc.toml` profiles | 0 |
 | tag-default→tag-X fallback | template-mode entries on `mise_env` | 2 |
@@ -43,7 +43,16 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   granularity is now per-profile.
 
 ### Known mise limitations we compensate for
-- No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc.
+- No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc. Renaming or deleting a
+  `config.<profile>.toml` leaves a dangling link in `~/.config/mise` that nothing reports
+  (`config ls`, `dotfiles status` and `doctor` all stay silent) while that profile quietly
+  stops applying — run `mise run cleanup` after any such change.
+- `--force` is never safe here: on the self-management entries it replaces the repo's own
+  config files with symlink loops and silently drops the global config. `install.sh` moves
+  conflicting files aside instead.
+- Files in `~/.config/mise` lose implicit trust while `MISE_GLOBAL_CONFIG_FILE` points at the
+  repo (first run only), so `install.sh` trusts each of them individually — trusting the
+  directory is not enough.
 - Sibling-config precedence inconsistent → one-key-one-file rule + `scripts/lint-config.py`.
 - `$MISE_ENV` invisible to hooks → all profile gating happens in tasks.
 - `--force-dotfiles` replaces without backup → cutover always unstows via the old repo first.
@@ -61,6 +70,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 5. `DOTFILES_PROFILES=<your profiles> ~/.dotfiles-mise/install.sh`
    — install.sh moves any conflicting real files (restored stow backups, skel rc files) aside
    to `<file>.pre-mise.bak` before applying; it never uses `--force-dotfiles`.
+   **Always upgrade through `install.sh`, not a bare `mise bootstrap`** — it owns the
+   `~/.config/mise` conversion, the trust fix-ups, and the conflict backups.
 6. Recreate this machine's local overlays — the old repo carried some machine-specific lines
    in committed files; they now belong in gitignored local files:
    - `~/.zshrc.local`: extra PATH entries (`/usr/share/code/bin`, `/usr/local/go/bin`),

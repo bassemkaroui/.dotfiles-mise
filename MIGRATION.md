@@ -82,10 +82,15 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - Sibling-config precedence inconsistent → one-key-one-file rule + `scripts/lint-config.py`.
 - `$MISE_ENV` invisible to hooks → all profile gating happens in tasks.
 - `--force-dotfiles` replaces without backup → cutover always unstows via the old repo first.
-  `install.sh` additionally *refuses to run* while any managed target still resolves into
-  `~/.dotfiles`, because the old repo deploys whole directories (`~/.config/bat`,
-  `~/.config/tmux`, `~/.config/yazi`, …) as symlinks — applying through one of those would
-  rewrite files inside the rollback path.
+  `install.sh` additionally *refuses to run* while any `[dotfiles]` target or
+  `[bootstrap.repos]` path still resolves into `~/.dotfiles`, because the old repo deploys
+  whole directories (`~/.config/bat`, `~/.config/tmux`, `~/.config/yazi`, …) as symlinks —
+  applying through one of those would rewrite files inside the rollback path, and mise
+  replaces a *symlink* without any conflict error (to mise a symlink is never data). The
+  check runs twice, before each bootstrap pass, because the profile files' entries are
+  invisible during the first one; it requires `python3`, and `install.sh` refuses to continue
+  without it while `~/.dotfiles` exists. `setup:repo-links` carries the same refusal, since it
+  is also reachable standalone.
 - **A `[dotfiles]` entry whose explicit `source` is missing aborts the entire apply**, not
   just that entry (verified 2026-07-20). So no entry may point at a path an earlier bootstrap
   step creates: `~/.config/tmux/tmux.conf` → `~/.tmux/.tmux.conf` and `~/.local/bin/fpp` are

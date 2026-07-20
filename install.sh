@@ -129,11 +129,34 @@ rescue_machine_local() {
     shopt -u nullglob
 }
 
+# Is $1 the mise/ directory of a clone of THIS repo (not necessarily $REPO)?
+#
+# "config.toml + tasks/" alone is NOT enough: the OLD repo's stow package
+# (~/.dotfiles/mise/tag-default/.config/mise) has exactly that shape, plus the
+# conf.d/*.toml files it tracks in git. Treating it as a legacy layout would
+# delete its ~/.config/mise deployment and *move its tracked conf.d files out of
+# its working tree* — mutating the rollback path before the old-repo guard
+# further down ever gets a chance to run. The sibling install.sh + home/ are
+# what actually identify this repo.
+is_this_repo_mise_dir() {
+    [[ -f "$1/config.toml" && -d "$1/tasks" && -f "$1/../install.sh" && -d "$1/../home" ]]
+}
+
+OLD_REPO="${DOTFILES_OLD_REPO:-$HOME/.dotfiles}"
+
 LEGACY_SRC=""
 if [[ -L "$CONF" ]]; then
     LINK_TARGET="$(readlink -f "$CONF" || true)"
-    # Any clone of this repo (not just $REPO) looks like: config.toml + tasks/
-    if [[ -f "$LINK_TARGET/config.toml" && -d "$LINK_TARGET/tasks" ]]; then
+    # Bail out before touching anything if ~/.config/mise is the OLD repo's
+    # stow deployment. The full guard below needs mise to enumerate targets;
+    # this one case has to be caught earlier, because step 3 mutates the
+    # filesystem before that guard runs.
+    if [[ -d "$OLD_REPO" && -n "$LINK_TARGET" && "$LINK_TARGET" == "$(readlink -f "$OLD_REPO")"/* ]]; then
+        # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+        die "~/.config/mise is still the OLD repo's stow deployment ($LINK_TARGET).
+      Unstow it first (MIGRATION.md step 3), then re-run this script."
+    fi
+    if [[ -n "$LINK_TARGET" ]] && is_this_repo_mise_dir "$LINK_TARGET"; then
         info "Converting legacy ~/.config/mise dir symlink into a real directory"
         # Drop the symlink first: while it stands, $CONF resolves *into* the
         # clone, so "move out of the repo" would be a no-op onto itself.
@@ -254,11 +277,20 @@ cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
 # path, so corrupting it is the one failure this script must not allow.
 # MIGRATION.md step 3 (unstow first) is the fix; this makes it enforced rather
 # than merely documented.
-OLD_REPO="${DOTFILES_OLD_REPO:-$HOME/.dotfiles}"
-if [[ -d "$OLD_REPO" ]] && command -v python3 &>/dev/null; then
+#
+# Called TWICE: once here (only config.toml is visible — MISE_GLOBAL_CONFIG_FILE
+# restricts mise to that one file, §2.12) and again after it is unset, when the
+# profile files' entries — ~/.config/yazi, ~/.config/ghostty/* — finally show
+# up. Checking once would miss exactly those, and a stow *directory* symlink is
+# replaced by mise without a conflict error (a symlink is never data to mise),
+# i.e. silently.
+guard_old_repo() {
+    [[ -d "$OLD_REPO" ]] || return 0
+    local old_real conflicts=() target expanded probe resolved
     old_real="$(cd "$OLD_REPO" && pwd -P)"
-    conflicts=()
+
     while IFS= read -r target; do
+        [[ -n "$target" ]] || continue
         expanded="${target/#\~/$HOME}"
         # Walk up to the nearest existing ancestor: the symlink is usually a
         # parent directory, not the target itself (which doesn't exist yet).
@@ -269,6 +301,7 @@ if [[ -d "$OLD_REPO" ]] && command -v python3 &>/dev/null; then
         resolved="$(readlink -f "$probe" 2>/dev/null || true)"
         [[ -n "$resolved" && "$resolved" == "$old_real"/* ]] && conflicts+=("$target -> $resolved")
     done < <(
+        # [dotfiles] targets …
         { mise dotfiles status --json 2>/dev/null || true; } |
             python3 -c '
 import json, sys
@@ -282,17 +315,54 @@ except json.JSONDecodeError:
 for f in data.get("files", []):
     print(f["target"])
 '
+        # … and [bootstrap.repos] paths, which are cloned/fetched in an EARLIER
+        # bootstrap step than dotfiles. ~/.tmux is a stow symlink into the old
+        # repo's oh-my-tmux submodule on a machine that hasn't unstowed yet, so
+        # a repos apply would run git inside that submodule's working tree.
+        { mise bootstrap repos status --json 2>/dev/null || true; } |
+            python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+if isinstance(data, dict):
+    data = data.get("repos", data.get("items", []))
+for r in data if isinstance(data, list) else []:
+    if isinstance(r, dict):
+        p = r.get("path") or r.get("target") or r.get("dir")
+        if p:
+            print(p)
+'
     )
+
     if ((${#conflicts[@]})); then
-        warn "These targets currently resolve INTO the old dotfiles repo ($OLD_REPO):"
-        for c in "${conflicts[@]}"; do warn "    $c"; done
+        warn "These paths currently resolve INTO the old dotfiles repo ($OLD_REPO):"
+        for target in "${conflicts[@]}"; do warn "    $target"; done
         die "Unstow the old repo first (MIGRATION.md step 3), then re-run this script.
        Applying now would rewrite files inside $OLD_REPO — the rollback path.
        Override with DOTFILES_OLD_REPO=/nonexistent only if you know better."
     fi
-fi
+}
 
-if command -v python3 &>/dev/null; then
+if [[ -d "$OLD_REPO" ]] && ! command -v python3 &>/dev/null; then
+    die "python3 is required to check whether $OLD_REPO is still deployed.
+      Without that check this script could rewrite files inside the old repo —
+      the documented rollback path. Install python3 (apt install python3), or
+      unstow the old repo and re-run with DOTFILES_OLD_REPO=/nonexistent."
+fi
+guard_old_repo
+
+# Also runs twice, for the same reason as guard_old_repo: under
+# MISE_GLOBAL_CONFIG_FILE the profile files' entries are invisible, so a
+# pre-existing real ~/.config/yazi would never be backed up and pass 2 would
+# die on the conflict — recommending --force, the one flag that is never safe
+# here (§2.13).
+backup_conflicts() {
+    command -v python3 &>/dev/null || return 0
     # `|| true`: a status failure must not kill the script via pipefail — the
     # backup pass is best-effort, and bootstrap below reports the real problem.
     { mise dotfiles status --json 2>/dev/null || true; } |
@@ -321,7 +391,9 @@ for f in data.get("files", []):
             # A failing mv must not abort the pass half-done under set -e.
             mv "$expanded" "$bak" || warn "Could not move $expanded aside — bootstrap may refuse it"
         done
-fi
+}
+
+backup_conflicts
 
 # ── 7. Bootstrap (two passes on a first run) ──────────────────────────────────
 # MISE_GLOBAL_CONFIG_FILE doesn't just relocate config.toml — it suppresses the
@@ -342,6 +414,11 @@ fi
 unset MISE_GLOBAL_CONFIG_FILE
 # Re-trust now that the linked files are what mise will resolve.
 mise trust "$CONF/config.toml" >/dev/null 2>&1 || true
+
+# Second look, now that the profile files are loaded: their [dotfiles] entries
+# were invisible above, and pass 2 is what applies them.
+guard_old_repo
+backup_conflicts
 
 info "Running mise bootstrap..."
 mise bootstrap "${YES[@]}"

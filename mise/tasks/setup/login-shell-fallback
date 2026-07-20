@@ -36,13 +36,16 @@ if [[ "$CURRENT_SHELL" == *zsh* ]]; then
     exit 0
 fi
 
-# mise's [bootstrap.user] runs exactly one command: `chsh -s <shell>` (upstream
-# bootstrap/user.md). That is rung 2 of the old repo's four-rung cascade
-# (setup/zsh:112-158). Rungs 1 and 3 — `sudo chsh` and `sudo usermod` — are the
-# ones that work unattended, because bare chsh PAM-prompts for a password. CI,
-# provisioning and `docker exec` all land there, so try them before falling back
-# to a login file. NSS-managed accounts skip both: they aren't in /etc/passwd,
-# so chsh/usermod can only fail with "user does not exist".
+# This task owns the login shell outright — there is no [bootstrap.user]
+# section, because mise's version runs bare `chsh -s`, which PAM-prompts and so
+# fails unattended, and a failing bootstrap step aborts every step after it
+# (§2.27). That made this very task unreachable in the case it exists for.
+#
+# The old repo's four-rung cascade (setup/zsh:112-158), in the order that works:
+# sudo chsh → sudo usermod (both unattended-safe) → plain chsh (needs a
+# terminal; a chained task does have one, §2.22) → `exec zsh` in a login file.
+# NSS-managed accounts skip the first three: they aren't in /etc/passwd, so
+# chsh/usermod can only fail with "user does not exist".
 NSS_ONLY=false
 if ! grep -q "^${USER}:" /etc/passwd 2>/dev/null; then
     NSS_ONLY=true
@@ -64,6 +67,17 @@ if [[ "$NSS_ONLY" == false ]] && command -v sudo &>/dev/null; then
             exit 0
         fi
     fi
+fi
+
+# Rung 3: plain chsh. It PAM-prompts, so it is only offered at a terminal —
+# which a chained task does have when the user runs `mise bootstrap` from one.
+if [[ "$NSS_ONLY" == false && -t 0 ]] && command -v chsh &>/dev/null; then
+    info "Trying chsh (it will ask for your password; Ctrl-C to skip)"
+    if chsh -s "$ZSH_PATH"; then
+        ok_changed "Login shell changed to $ZSH_PATH via chsh"
+        exit 0
+    fi
+    warn "chsh did not change the login shell — falling back to the login file"
 fi
 
 # ~/.bash_profile, not ~/.profile: bash prefers it, and ~/.profile is a managed

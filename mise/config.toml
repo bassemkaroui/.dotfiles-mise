@@ -89,7 +89,10 @@ jq = "latest"
 # gpg refuses to use a ~/.gnupg it considers unsafe, and mise would otherwise
 # create it with the process umask when applying ~/.gnupg/gpg-agent.conf.
 # Creating it 0700 first is idempotent; applying does not touch the mode after.
-pre-dotfiles = "mkdir -p ~/.gnupg && chmod 700 ~/.gnupg"
+# ~/.ssh gets the same treatment ahead of the companion repo's ~/.ssh/config
+# entry: ssh refuses a group/world-writable directory, and mise would create it
+# at the process umask (0775 observed at umask 002).
+pre-dotfiles = "mkdir -p ~/.gnupg ~/.ssh && chmod 700 ~/.gnupg ~/.ssh"
 
 [bootstrap.hooks.post-tools]
 run = [
@@ -141,10 +144,17 @@ run = [
 # writes and commits into another git repo. All three are run by hand.
 
 # ── Login shell ───────────────────────────────────────────────────────────────
-# NSS-managed accounts (OS Login/LDAP) where chsh can't work get a fallback
-# task in Phase 3 (`exec zsh` from ~/.bash_profile).
-[bootstrap.user]
-login_shell = "/usr/bin/zsh"
+# NO [bootstrap.user] SECTION, deliberately. It runs exactly one command,
+# `chsh -s <shell>` (§2.19), which PAM-prompts and therefore FAILS on every
+# unattended run — and a failing bootstrap step aborts everything after it
+# (verified 2026-07-20: the `user` step precedes `task`, so the whole
+# [tasks.bootstrap] tail, install.sh included, dies with rc=1). The step meant
+# to rescue that case, setup:login-shell-fallback, was itself unreachable
+# because of it.
+#
+# setup:login-shell-fallback owns the login shell instead: sudo chsh → sudo
+# usermod → interactive chsh → `exec zsh` in ~/.bash_profile, each rung tried
+# only where it can work. See §2.27 of the plan.
 
 # ── Dotfiles ──────────────────────────────────────────────────────────────────
 # Sourceless entries mirror the target path under dotfiles.root (home/).

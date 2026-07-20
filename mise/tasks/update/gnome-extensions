@@ -103,7 +103,8 @@ if [[ -z "$(git -C "$git_root" status --porcelain -- "$MANIFEST_REAL" "$SETTINGS
     exit 0
 fi
 
-git -C "$git_root" add -- "$MANIFEST_REAL" "$SETTINGS_REAL"
+git -C "$git_root" add -- "$MANIFEST_REAL" "$SETTINGS_REAL" \
+    || skip "git add refused those paths in $git_root (ignored there?) — commit by hand"
 git -C "$git_root" commit -m "gnome-extensions: update manifest and settings" >/dev/null \
     || warn "git commit failed in $git_root (nothing staged, or a hook refused)"
 ok_changed "Committed the update in $git_root"

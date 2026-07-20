@@ -40,7 +40,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 installed=0 present=0 failed=0
 
-while IFS= read -r uuid; do
+while IFS= read -r uuid || [[ -n "$uuid" ]]; do
     [[ -z "$uuid" || "$uuid" == \#* ]] && continue
 
     if gnome-extensions info "$uuid" &>/dev/null; then
@@ -91,14 +91,20 @@ elif [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
     # running shell will never read. Say so rather than claim success.
     warn "No DBUS session — skipping settings restore (re-run from a desktop session)"
 else
-    dconf load /org/gnome/shell/extensions/ <"$SETTINGS"
-    ok_changed "Extension settings restored from $SETTINGS"
+    # dconf load exits 1 on a malformed dump (verified) — e.g. an
+    # extension-settings.dconf left half-written by an interrupted capture.
+    # Report it; do not take the rest of the chain down with it.
+    if dconf load /org/gnome/shell/extensions/ <"$SETTINGS"; then
+        ok_changed "Extension settings restored from $SETTINGS"
+    else
+        warn "dconf rejected $SETTINGS — extensions keep their current settings"
+    fi
 fi
 
 # ─── Enable them ──────────────────────────────────────────────────────────────
 
 enabled=0
-while IFS= read -r uuid; do
+while IFS= read -r uuid || [[ -n "$uuid" ]]; do
     [[ -z "$uuid" || "$uuid" == \#* ]] && continue
     gnome-extensions info "$uuid" &>/dev/null || continue
 

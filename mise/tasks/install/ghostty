@@ -14,8 +14,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #
 #   - the .graphical-env detect-and-prompt block: listing `graphical` in
 #     miserc.toml IS the answer to "does this machine have a display?";
-#   - the .install-exclude registry: opting out is now not selecting the
-#     profile (or `mise run install:ghostty` by hand).
+#   - the .install-exclude registry: opting out is now leaving `graphical` out
+#     of miserc.toml. (The gate applies to a hand-run too — this task is a
+#     no-op without the profile however it is invoked.)
 #
 # And two behaviours changed, both because this runs inside [tasks.bootstrap]:
 # the install method comes from a flag/env var rather than a prompt (stdin is
@@ -33,7 +34,9 @@ case "${METHOD,,}" in
     a | appimage) METHOD="appimage" ;;
     s | source) METHOD="source" ;;
     n | snap) METHOD="snap" ;;
-    *) fail "Unknown install method '$METHOD' (use deb, appimage, source or snap)" ;;
+    # skip, not fail: GHOSTTY_INSTALL_METHOD is an environment variable, so a
+    # typo in a shell profile would otherwise abort the whole bootstrap chain.
+    *) skip "Unknown install method '$METHOD' (use deb, appimage, source or snap)" ;;
 esac
 
 # ─── Latest upstream version ──────────────────────────────────────────────────
@@ -67,7 +70,7 @@ if [[ "$METHOD" == "deb" ]]; then
     # mise's [bootstrap.packages] apt manager can't add a PPA, so this stays
     # imperative. Every elevation is gated: an unattended bootstrap must not
     # block on a sudo password prompt.
-    sudo_ok || skip "deb install needs passwordless sudo — run 'mise run install:ghostty' by hand"
+    sudo_ok || skip "The deb install needs root, and sudo cannot ask for a password here — run 'mise run install:ghostty' in a terminal"
 
     if ! have add-apt-repository; then
         sudo -n apt-get install -y software-properties-common \
@@ -106,7 +109,7 @@ elif [[ "$METHOD" == "appimage" ]]; then
 # ─── snap ─────────────────────────────────────────────────────────────────────
 
 elif [[ "$METHOD" == "snap" ]]; then
-    sudo_ok || skip "snap install needs passwordless sudo — run 'mise run install:ghostty' by hand"
+    sudo_ok || skip "The snap install needs root, and sudo cannot ask for a password here — run 'mise run install:ghostty' in a terminal"
 
     # /etc/ld.so.preload (Citrix AppProtection) injects a libX11-dependent
     # library that breaks snap at the dynamic linker. Move it aside for the
@@ -150,7 +153,7 @@ else
             dpkg -s "$pkg" &>/dev/null || missing+=("$pkg")
         done
         if [[ ${#missing[@]} -gt 0 ]]; then
-            sudo_ok || skip "Build deps missing (${missing[*]}) and sudo needs a password"
+            sudo_ok || skip "Build deps missing (${missing[*]}) and sudo cannot ask for a password here"
             sudo -n apt-get install -y "${missing[@]}" || skip "Could not install build deps: ${missing[*]}"
             ok_changed "Installed build dependencies: ${missing[*]}"
         fi

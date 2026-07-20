@@ -60,3 +60,64 @@ require_profile() {
         exit 0
     fi
 }
+
+# ─── Degrading instead of failing ─────────────────────────────────────────────
+#
+# A `{ task = "x" }` entry in [tasks.bootstrap].run that exits non-zero ABORTS
+# the rest of the chain and makes `mise bootstrap` exit with that code
+# (verified 2026-07-20: a→b(exit 3)→c ran a and b, never c, rc=3). Every step
+# after the failing one is lost — so an optional install that can't reach the
+# network must never take completions, git signing or the login-shell fallback
+# down with it.
+#
+# Rule for the ported install tasks: `fail` is for "this machine is in a state
+# I refuse to guess about"; anything environmental (no network, no sudo, no
+# desktop session, no upstream asset for this release) uses `skip`.
+
+# skip <reason...> — warn and exit 0. The bootstrap continues.
+skip() {
+    warn "$*"
+    exit 0
+}
+
+# ─── Capability probes ────────────────────────────────────────────────────────
+#
+# Profiles express POLICY ("this machine should have GNOME extensions"); they
+# say nothing about CAPABILITY ("gnome-shell is installed and running right
+# now"). The old repo conflated the two in its auto-detection; keeping the
+# cheap runtime probes as skip-guards is what stops `mise bootstrap` from
+# failing on a box whose desktop isn't installed yet (e.g. provisioning over
+# SSH before the first graphical login).
+
+# have <binary...> — true only when every named binary is on PATH.
+have() {
+    local b
+    for b in "$@"; do
+        command -v "$b" &>/dev/null || return 1
+    done
+    return 0
+}
+
+# sudo_ok — true when sudo can elevate WITHOUT prompting. Bootstrap runs
+# unattended often enough (CI, provisioning, `mise bootstrap --yes` in a
+# terminal the user walked away from) that a password prompt is a hang, not an
+# interaction. Callers warn and skip the privileged part instead.
+sudo_ok() {
+    command -v sudo &>/dev/null && sudo -n true 2>/dev/null
+}
+
+# gh_curl <curl args...> — curl with a GitHub token attached when one is
+# available. install.sh exports a token for mise's own downloads, but a plain
+# curl never picks it up, and these tasks all hit api.github.com (60 req/hr
+# unauthenticated, shared with every other tool on the machine).
+gh_curl() {
+    local token="${MISE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+    if [[ -z "$token" ]] && command -v gh &>/dev/null; then
+        token="$(gh auth token 2>/dev/null || true)"
+    fi
+    if [[ -n "$token" ]]; then
+        curl -H "Authorization: Bearer $token" "$@"
+    else
+        curl "$@"
+    fi
+}

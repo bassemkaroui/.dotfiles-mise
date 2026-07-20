@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+#MISE description="Install the Ghostty terminal (graphical profile)"
+#MISE raw=true
+#USAGE flag "--method <method>" help="deb (default) | appimage | source | snap"
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:ghostty"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's install:ghostty. Two things are deliberately gone:
+#
+#   - the .graphical-env detect-and-prompt block: listing `graphical` in
+#     miserc.toml IS the answer to "does this machine have a display?";
+#   - the .install-exclude registry: opting out is now not selecting the
+#     profile (or `mise run install:ghostty` by hand).
+#
+# And two behaviours changed, both because this runs inside [tasks.bootstrap]:
+# the install method comes from a flag/env var rather than a prompt (stdin is
+# not a terminal there — /dev/tty is not even openable, verified), and an
+# available upgrade is only *reported* unless --update is passed, so a plain
+# `mise bootstrap` never swaps the terminal binary out from under a running
+# session.
+require_profile graphical
+
+METHOD="${usage_method:-${GHOSTTY_INSTALL_METHOD:-deb}}"
+DO_UPDATE="${usage_update:-false}"
+
+case "${METHOD,,}" in
+    d | deb) METHOD="deb" ;;
+    a | appimage) METHOD="appimage" ;;
+    s | source) METHOD="source" ;;
+    n | snap) METHOD="snap" ;;
+    *) fail "Unknown install method '$METHOD' (use deb, appimage, source or snap)" ;;
+esac
+
+# ─── Latest upstream version ──────────────────────────────────────────────────
+
+LATEST="$(gh_curl -fsSL "https://api.github.com/repos/ghostty-org/ghostty/tags?per_page=1" 2>/dev/null \
+    | grep '"name"' | head -1 | sed -E 's/.*"v([^"]+)".*/\1/' || true)"
+[[ -n "$LATEST" ]] || skip "Could not reach the GitHub API for the latest Ghostty release"
+ok "Latest Ghostty release: $LATEST"
+
+# ─── Already installed? ───────────────────────────────────────────────────────
+
+if have ghostty; then
+    CURRENT="$(ghostty --version 2>&1 | head -1 | sed -E 's/[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+    if [[ "$CURRENT" == "$LATEST" ]]; then
+        ok "Ghostty is up to date ($CURRENT)"
+        exit 0
+    fi
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        info "Ghostty $CURRENT installed; $LATEST is available"
+        info "(upgrade with: mise run install:ghostty --update)"
+        exit 0
+    fi
+    info "Upgrading Ghostty $CURRENT → $LATEST via $METHOD ..."
+else
+    info "Installing Ghostty $LATEST via $METHOD ..."
+fi
+
+# ─── deb (PPA) ────────────────────────────────────────────────────────────────
+
+if [[ "$METHOD" == "deb" ]]; then
+    # mise's [bootstrap.packages] apt manager can't add a PPA, so this stays
+    # imperative. Every elevation is gated: an unattended bootstrap must not
+    # block on a sudo password prompt.
+    sudo_ok || skip "deb install needs passwordless sudo — run 'mise run install:ghostty' by hand"
+
+    if ! have add-apt-repository; then
+        sudo -n apt-get install -y software-properties-common \
+            || skip "Could not install software-properties-common (needed to add the PPA)"
+    fi
+    sudo -n add-apt-repository -y ppa:mkasberg/ghostty-ubuntu || skip "Could not add the Ghostty PPA"
+    sudo -n apt-get update || skip "apt-get update failed"
+    sudo -n apt-get install -y ghostty || skip "apt-get install ghostty failed"
+    ok_changed "Ghostty installed via deb (ppa:mkasberg/ghostty-ubuntu)"
+
+# ─── AppImage (no sudo needed) ────────────────────────────────────────────────
+
+elif [[ "$METHOD" == "appimage" ]]; then
+    case "$(uname -m)" in
+        x86_64) arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        *) skip "No Ghostty AppImage for architecture $(uname -m)" ;;
+    esac
+
+    url="$(gh_curl -fsSL "https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest" 2>/dev/null \
+        | grep '"browser_download_url"' | grep "${arch}\.AppImage\"" | head -1 \
+        | sed -E 's/.*"(https[^"]+)".*/\1/' || true)"
+    [[ -n "$url" ]] || skip "Could not find a Ghostty AppImage download URL for $arch"
+
+    mkdir -p "$HOME/.local/bin"
+    dest="$HOME/.local/bin/ghostty"
+    tmp="$(mktemp)"
+    if ! curl -fSL -o "$tmp" "$url"; then
+        rm -f "$tmp"
+        skip "Failed to download the Ghostty AppImage"
+    fi
+    chmod +x "$tmp"
+    mv "$tmp" "$dest"
+    ok_changed "Ghostty AppImage installed to $dest"
+
+# ─── snap ─────────────────────────────────────────────────────────────────────
+
+elif [[ "$METHOD" == "snap" ]]; then
+    sudo_ok || skip "snap install needs passwordless sudo — run 'mise run install:ghostty' by hand"
+
+    # /etc/ld.so.preload (Citrix AppProtection) injects a libX11-dependent
+    # library that breaks snap at the dynamic linker. Move it aside for the
+    # duration; the trap restores it even if the install dies.
+    preload_moved=false
+    if [[ -f /etc/ld.so.preload ]]; then
+        warn "/etc/ld.so.preload present — disabling it for the snap install (Citrix workaround)"
+        sudo -n mv /etc/ld.so.preload /etc/ld.so.preload.bak || skip "Could not move /etc/ld.so.preload aside"
+        preload_moved=true
+        # shellcheck disable=SC2064  # intentional: expand $preload_moved never, run sudo at exit
+        trap 'sudo -n mv /etc/ld.so.preload.bak /etc/ld.so.preload 2>/dev/null || true' EXIT
+    fi
+
+    have snap || sudo -n apt-get install -y snapd || skip "Could not install snapd"
+    sudo -n snap install ghostty --classic || skip "snap install ghostty failed"
+    ok_changed "Ghostty installed via snap"
+
+    if [[ "$preload_moved" == true && -f /etc/ld.so.preload.bak ]]; then
+        sudo -n mv /etc/ld.so.preload.bak /etc/ld.so.preload
+        ok "Restored /etc/ld.so.preload"
+    fi
+
+# ─── source build ─────────────────────────────────────────────────────────────
+
+else
+    # zig is a core [tools] entry, so it is already on PATH inside a task.
+    have zig || skip "zig not found — cannot build Ghostty from source"
+    ok "Building with $(zig version)"
+
+    deps=(libgtk-4-dev libadwaita-1-dev gettext libxml2-utils)
+    layer_shell=true
+    if have dpkg apt-get; then
+        if apt-cache show libgtk4-layer-shell-dev &>/dev/null 2>&1; then
+            deps+=(libgtk4-layer-shell-dev)
+        else
+            warn "libgtk4-layer-shell-dev unavailable — building without it"
+            layer_shell=false
+        fi
+        missing=()
+        for pkg in "${deps[@]}"; do
+            dpkg -s "$pkg" &>/dev/null || missing+=("$pkg")
+        done
+        if [[ ${#missing[@]} -gt 0 ]]; then
+            sudo_ok || skip "Build deps missing (${missing[*]}) and sudo needs a password"
+            sudo -n apt-get install -y "${missing[@]}" || skip "Could not install build deps: ${missing[*]}"
+            ok_changed "Installed build dependencies: ${missing[*]}"
+        fi
+    else
+        warn "Not an apt system — ensure GTK4, libadwaita, gettext and libxml2-utils are present"
+    fi
+
+    tarball="ghostty-${LATEST}.tar.gz"
+    build="$(mktemp -d)"
+    trap 'rm -rf "$build"' EXIT
+    curl -fSL -o "$build/$tarball" "https://release.files.ghostty.org/${LATEST}/${tarball}" \
+        || skip "Could not download the Ghostty source tarball"
+    tar xzf "$build/$tarball" -C "$build"
+
+    flags=(-p "$HOME/.local" -Doptimize=ReleaseFast)
+    [[ "$layer_shell" == false ]] && flags+=(-fno-sys=gtk4-layer-shell)
+    info "Building Ghostty (this takes a while) ..."
+    (cd "$build/ghostty-${LATEST}" && zig build "${flags[@]}") || skip "Ghostty source build failed"
+    ok_changed "Ghostty built and installed into ~/.local"
+fi
+
+# ─── Verify ───────────────────────────────────────────────────────────────────
+
+# ~/.local/bin is on PATH via .zprofile, but not necessarily in THIS process.
+export PATH="$HOME/.local/bin:$PATH"
+if have ghostty; then
+    ok "Ghostty ready: $(ghostty --version 2>&1 | head -1)"
+else
+    warn "Ghostty is not on PATH yet — open a new shell, or check the install output above"
+fi

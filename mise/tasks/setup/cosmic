@@ -17,8 +17,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 # membership that lets ddcutil talk to /dev/i2c-* without root.
 #
 # The theme is NOT applied from here. The old task ended by invoking the
-# interactive picker, which cannot work inside [tasks.bootstrap] — stdin is not
-# a terminal there and /dev/tty is not even openable (verified). Run
+# interactive picker; a chained task can prompt when bootstrap is run from a
+# terminal, but then an unattended bootstrap would hang on a menu. Run
 # `mise run setup:cosmic-theme` when you want to change it.
 require_profile cosmic
 

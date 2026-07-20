@@ -10,8 +10,10 @@ LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
 source "$LIB/profile.sh"
 
 # Port of the old repo's setup:cosmic-theme, minus the is_cosmic() detection.
-# Deliberately NOT part of [tasks.bootstrap]: it is a menu, and a menu cannot
-# run in the bootstrap chain (stdin is not a terminal there). Run it by hand.
+# Deliberately NOT part of [tasks.bootstrap]: it is a menu, and an unattended
+# bootstrap must not stop at one. (The [[ -t 0 ]] guard below would make it
+# safe to chain — a chained task does have a terminal when bootstrap is run
+# from one — but a theme choice is not bootstrap's business.)
 require_profile cosmic
 
 HELPER="$LIB/cosmic_theme.py"

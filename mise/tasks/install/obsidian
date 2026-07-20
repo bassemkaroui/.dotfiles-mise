@@ -14,10 +14,10 @@ source "$LIB/obsidian.sh"
 
 # Port of the old repo's install:obsidian. Gone: the .graphical-env detection,
 # the .install-exclude registry, and the "Install Obsidian? [Y/n]" prompt —
-# selecting the `graphical` profile IS the consent, and a prompt cannot work
-# inside [tasks.bootstrap] anyway (stdin is not a terminal there). As with
-# ghostty, an available upgrade is reported and only applied with --update, so
-# a routine `mise bootstrap` never replaces a running editor's binary.
+# selecting the `graphical` profile IS the consent, and a prompt would hang an
+# unattended bootstrap. As with ghostty, an available upgrade is reported and
+# only applied with --update, so a routine `mise bootstrap` never replaces a
+# running editor's binary.
 require_profile graphical
 
 DO_UPDATE="${usage_update:-false}"

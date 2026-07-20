@@ -12,9 +12,9 @@
 # (setup:fonts). Most desktops pull it in already; explicit because a minimal
 # graphical install may not.
 "apt:fontconfig" = "latest"
-# add-apt-repository, for install:ghostty's default deb path — mise's apt
-# manager installs packages but cannot add a PPA. The task also installs it on
-# demand, for machines that choose a different install method.
+# add-apt-repository, for install:ghostty's `--method deb` path — mise's apt
+# manager installs packages but cannot add a PPA. Not needed by the default
+# AppImage method; the task also installs it on demand.
 "apt:software-properties-common" = "latest"
 
 [dotfiles]

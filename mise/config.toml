@@ -133,9 +133,10 @@ run = [
     { task = "setup:cosmic" },
 ]
 # Not in the chain, by design: setup:cosmic-theme, setup:cosmic-theme-clean and
-# update:gnome-extensions. The first two are menus (stdin is not a terminal in
-# a chained task — /dev/tty cannot even be opened), and the third writes and
-# commits into another git repo. All three are run by hand.
+# update:gnome-extensions. The first two are menus — a chained task does get a
+# terminal when bootstrap is run from one, but a bootstrap that stops to ask
+# which theme you want is a bootstrap that can't run unattended — and the third
+# writes and commits into another git repo. All three are run by hand.
 
 # ── Login shell ───────────────────────────────────────────────────────────────
 # NSS-managed accounts (OS Login/LDAP) where chsh can't work get a fallback

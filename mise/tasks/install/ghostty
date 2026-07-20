@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Install the Ghostty terminal (graphical profile)"
 #MISE raw=true
-#USAGE flag "--method <method>" help="deb (default) | appimage | source | snap"
+#USAGE flag "--method <method>" help="appimage (default) | deb | source | snap"
 #USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
 set -eo pipefail
 
@@ -18,15 +18,23 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #     of miserc.toml. (The gate applies to a hand-run too — this task is a
 #     no-op without the profile however it is invoked.)
 #
-# And two behaviours changed, both because this runs inside [tasks.bootstrap]:
-# the install method comes from a flag/env var rather than a prompt (stdin is
-# not a terminal there — /dev/tty is not even openable, verified), and an
-# available upgrade is only *reported* unless --update is passed, so a plain
-# `mise bootstrap` never swaps the terminal binary out from under a running
-# session.
+# And two behaviours changed, because this runs inside [tasks.bootstrap]:
+#
+#   - the install method comes from --method / $GHOSTTY_INSTALL_METHOD rather
+#     than a prompt. A chained task *does* have a terminal when the user runs
+#     `mise bootstrap` from one (verified under a pty), so a prompt would work
+#     — but it would also hang every unattended run (CI, provisioning, a
+#     terminal the user walked away from), and a flag is testable;
+#   - an available upgrade is only *reported* unless --update is passed, so a
+#     plain `mise bootstrap` never swaps the terminal binary out from under a
+#     running session.
+#
+# The default is the AppImage: it needs no sudo, no PPA and no apt at all, so
+# it is the one method that completes on an unattended run and on a machine
+# where the user has no root. The deb (PPA) path is a --method away.
 require_profile graphical
 
-METHOD="${usage_method:-${GHOSTTY_INSTALL_METHOD:-deb}}"
+METHOD="${usage_method:-${GHOSTTY_INSTALL_METHOD:-appimage}}"
 DO_UPDATE="${usage_update:-false}"
 
 case "${METHOD,,}" in

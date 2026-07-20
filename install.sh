@@ -389,7 +389,11 @@ try:
 except json.JSONDecodeError:
     sys.exit(0)
 for f in data.get("files", []):
-    if f.get("mode") == "symlink" and f.get("state") == "differs":
+    # Any mode, not just symlink. A template-mode entry OVERWRITES a
+    # pre-existing real file silently — no error, no backup (verified
+    # 2026-07-20 against ~/.ssh/config) — where symlink mode at least
+    # refuses. Backing up every differing target is the only defence.
+    if f.get("state") == "differs":
         print(f["target"])
 ' |
         while IFS= read -r target; do

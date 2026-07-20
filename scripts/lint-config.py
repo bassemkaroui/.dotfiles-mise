@@ -40,6 +40,14 @@ MISE_DIR = os.path.join(REPO, "mise")
 
 NAMESPACES = ["dotfiles", "bootstrap.repos", "bootstrap.packages", "tools", "vars", "tasks"]
 
+# Settings that must be declared exactly once across the whole config family.
+# dotfiles.root is the one that matters: a second declaration (e.g. a companion
+# repo trying to mirror its own home/) is resolved by mise's inconsistent
+# sibling precedence (§2.2) and the loser's sourceless entries then resolve
+# under the winner's root — reported as "source missing", which aborts every
+# apply. Verified: a conf.d drop-in declaring it lost silently to the main repo.
+SINGLETON_SETTINGS = ["dotfiles.root"]
+
 # D9a: the only permitted self-management entries, and their only permitted home.
 SELF_MANAGED_KEYS = {
     "~/.config/mise/config*.toml",
@@ -100,9 +108,10 @@ def check_self_managed(path: str, rel: str, data: dict, problems: list[str]) -> 
 def check_sources(rel: str, data: dict, problems: list[str]) -> None:
     """A [dotfiles] entry whose source is missing aborts the whole apply."""
     for key, value in extract("dotfiles", data).items():
-        if not isinstance(value, dict):
-            continue
-        source = value.get("source")
+        # mise accepts both `target = "source"` and the dict form; the
+        # shorthand was silently skipped here, so a companion repo using it
+        # got a green lint and an apply that aborts for the WHOLE machine.
+        source = value.get("source") if isinstance(value, dict) else value
         if not isinstance(source, str) or any(c in source for c in "*?["):
             continue  # globs are resolved by mise; nothing to stat here
         if not os.path.exists(os.path.expanduser(source)):
@@ -194,6 +203,14 @@ def main() -> int:
             for ns in NAMESPACES:
                 for key in extract(ns, data):
                     seen.setdefault((ns, key), rel)
+            # Singleton settings too, or a drop-in redeclaring dotfiles.root
+            # would look collision-free against the repo baseline.
+            for setting in SINGLETON_SETTINGS:
+                cur = data.get("settings")
+                for part in setting.split("."):
+                    cur = cur.get(part) if isinstance(cur, dict) else None
+                if cur is not None:
+                    seen.setdefault(("settings", setting), rel)
 
     for path in files:
         rel = os.path.relpath(path, REPO) if not args.live else path
@@ -206,6 +223,21 @@ def main() -> int:
         except OSError as e:
             problems.append(f"READ ERROR: {rel}: {e}")
             continue
+
+        for setting in SINGLETON_SETTINGS:
+            parts = setting.split(".")
+            cur = data.get("settings")
+            for part in parts:
+                cur = cur.get(part) if isinstance(cur, dict) else None
+            if cur is not None:
+                ident = ("settings", setting)
+                if ident in seen:
+                    problems.append(
+                        f"COLLISION: [settings] {setting!r} declared in both {seen[ident]} "
+                        f"and {rel} — precedence between sibling configs is undefined"
+                    )
+                else:
+                    seen[ident] = rel
 
         for ns in NAMESPACES:
             for key in extract(ns, data):

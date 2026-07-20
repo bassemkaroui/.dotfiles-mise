@@ -103,17 +103,39 @@ run = [
 # ── Imperative tail ───────────────────────────────────────────────────────────
 # Runs after packages/repos/dotfiles/user/tools. Steps run in order, each is
 # idempotent, and each gates itself on $MISE_ENV where it needs to (tasks DO
-# see it). Graphical steps (fonts, ghostty, obsidian, veracrypt) land here in
-# Phase 3b.
+# see it, hooks do not).
+#
+# ORDER MATTERS, and not the way the plan first assumed: a step that exits
+# non-zero ABORTS the rest of the chain and fails `mise bootstrap` with its
+# code (verified 2026-07-20). So the steps every machine needs run FIRST, and
+# the optional installs — which depend on the network, on sudo, and on
+# third-party release APIs — run last, where a bad day costs only themselves.
+# Those tasks additionally use lib/profile.sh's `skip` (warn + exit 0) for
+# anything environmental, so even here a failure is not a failed bootstrap.
 [tasks.bootstrap]
 description = "Imperative tail: the machine state mise can't declare"
 run = [
+    # 1. Wire the private custom repo first: setup:git-signing and the GNOME
+    #    extension manifest both read data it deploys.
     { task = "setup:custom-hookup" },
+    # 2. Links into [bootstrap.repos] clones (oh-my-tmux config, fpp).
     { task = "setup:repo-links" },
+    # 3. The three every machine needs, headless included.
     { task = "setup:completions" },
     { task = "setup:git-signing" },
     { task = "setup:login-shell-fallback" },
+    # 4. Profile-gated installs. Each no-ops without its profile.
+    { task = "setup:fonts" },
+    { task = "install:ghostty" },
+    { task = "install:obsidian" },
+    { task = "install:veracrypt" },
+    { task = "install:gnome-extensions" },
+    { task = "setup:cosmic" },
 ]
+# Not in the chain, by design: setup:cosmic-theme, setup:cosmic-theme-clean and
+# update:gnome-extensions. The first two are menus (stdin is not a terminal in
+# a chained task — /dev/tty cannot even be opened), and the third writes and
+# commits into another git repo. All three are run by hand.
 
 # ── Login shell ───────────────────────────────────────────────────────────────
 # NSS-managed accounts (OS Login/LDAP) where chsh can't work get a fallback

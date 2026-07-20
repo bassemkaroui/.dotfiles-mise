@@ -80,6 +80,41 @@ jq = "latest"
 # PathPicker (fpp); the ~/.local/bin/fpp symlink task lands in Phase 3
 "~/.local/opt/PathPicker" = { url = "https://github.com/facebook/PathPicker.git" }
 
+# ── Hooks ─────────────────────────────────────────────────────────────────────
+# $MISE_ENV is NOT visible to hooks (verified), so everything here must be
+# unconditional and safe on every machine — anything profile-dependent belongs
+# in a task. Hooks also run in the caller's environment, hence `mise exec --`
+# for anything that needs a [tools] binary on PATH.
+[bootstrap.hooks]
+# gpg refuses to use a ~/.gnupg it considers unsafe, and mise would otherwise
+# create it with the process umask when applying ~/.gnupg/gpg-agent.conf.
+# Creating it 0700 first is idempotent; applying does not touch the mode after.
+pre-dotfiles = "mkdir -p ~/.gnupg && chmod 700 ~/.gnupg"
+
+[bootstrap.hooks.post-tools]
+run = [
+    # corepack ships with the `dev` profile; enable it when present (old
+    # setup:nodes-tools). Guarded internally because hooks can't see profiles.
+    "mise exec -- sh -c 'command -v corepack >/dev/null 2>&1 && corepack enable || true'",
+    # Register the tokyonight theme deployed above into bat's cache.
+    "mise exec -- sh -c 'command -v bat >/dev/null 2>&1 && bat cache --build >/dev/null || true'",
+]
+
+# ── Imperative tail ───────────────────────────────────────────────────────────
+# Runs after packages/repos/dotfiles/user/tools. Steps run in order, each is
+# idempotent, and each gates itself on $MISE_ENV where it needs to (tasks DO
+# see it). Graphical steps (fonts, ghostty, obsidian, veracrypt) land here in
+# Phase 3b.
+[tasks.bootstrap]
+description = "Imperative tail: the machine state mise can't declare"
+run = [
+    { task = "setup:custom-hookup" },
+    { task = "setup:repo-links" },
+    { task = "setup:completions" },
+    { task = "setup:git-signing" },
+    { task = "setup:login-shell-fallback" },
+]
+
 # ── Login shell ───────────────────────────────────────────────────────────────
 # NSS-managed accounts (OS Login/LDAP) where chsh can't work get a fallback
 # task in Phase 3 (`exec zsh` from ~/.bash_profile).
@@ -105,3 +140,49 @@ login_shell = "/usr/bin/zsh"
 "~/.bashrc" = { mode = "symlink" }
 "~/.profile" = { mode = "symlink" }
 "~/.bash_logout" = { mode = "symlink" }
+
+# fzf key bindings / completion, sourced by the guarded stanza in .zshrc.
+# (The old repo's .fzf.bash came with it but nothing in either repo's .bashrc
+# ever sourced it — consciously dropped, see MIGRATION.md.)
+"~/.fzf.zsh" = { mode = "symlink" }
+
+# bat theme. bat's cache lives in ~/.cache, so a per-file entry is enough;
+# `bat cache --build` (post-tools hook) is what makes the theme selectable.
+"~/.config/bat/themes/tokyonight_night.tmTheme" = { mode = "symlink" }
+
+# tmux: oh-my-tmux is cloned to ~/.tmux by [bootstrap.repos]. Its own
+# .tmux.conf is linked to ~/.config/tmux/tmux.conf by the setup:repo-links
+# task, NOT by a [dotfiles] entry — an entry with an explicit source that
+# doesn't exist yet aborts the ENTIRE apply (verified), and install.sh's
+# first pass runs dotfiles before repos. tmux.conf.local is ours, so it is a
+# normal entry. ~/.config/tmux/plugins/ stays unmanaged (tpm writes there).
+"~/.config/tmux/tmux.conf.local" = { mode = "symlink" }
+
+# GitHub CLIs. D8: only our config is managed — hosts.yml (OAuth token) and
+# state.yml must never be captured into the repo.
+"~/.config/gh/config.yml" = { mode = "symlink" }
+"~/.config/gh-dash/config.yml" = { mode = "symlink" }
+
+# Claude Code. D8: per-file, never a whole-dir link — ~/.claude also holds
+# credentials, project history and local state. commands/ is symlink-each so
+# machine-local commands can live alongside the managed ones.
+"~/.claude/settings.json" = { mode = "symlink" }
+"~/.claude/keybindings.json" = { mode = "symlink" }
+"~/.claude/CLAUDE.md" = { mode = "symlink" }
+"~/.claude/statusline-command.sh" = { mode = "symlink" }
+"~/.claude/.editorconfig" = { mode = "symlink" }
+"~/.claude/commands" = { mode = "symlink-each" }
+# Empty in the old repo too, but tracked (and whitelisted in .gitignore) so the
+# mechanism is there the day a skill or agent gets committed. symlink-each
+# leaves anything the machine keeps in those dirs alone.
+"~/.claude/skills" = { mode = "symlink-each" }
+"~/.claude/agents" = { mode = "symlink-each" }
+
+"~/.config/ruff/ruff.toml" = { mode = "symlink" }
+"~/.config/hunk/config.toml" = { mode = "symlink" }
+
+# GPG. D8: only the agent config — keyrings stay out of the repo. mise creates
+# missing parent dirs with the process umask (0755/0775 observed), and gpg
+# refuses to use a group/world-readable ~/.gnupg, so the pre-dotfiles hook
+# below creates it 0700 first.
+"~/.gnupg/gpg-agent.conf" = { mode = "symlink" }

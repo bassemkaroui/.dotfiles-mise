@@ -7,8 +7,9 @@
 #
 # The relative path resolves through ~/.config/mise/tasks, which is a symlink
 # to this repo's mise/tasks (D1a self-management), so it works both from the
-# repo and from a deployed machine. Files in lib/ are not executable and mise
-# does not list them as tasks (verified).
+# repo and from a deployed machine. Files in lib/ are deliberately NOT
+# executable: mise lists an executable file under tasks/lib/ as a task
+# (`lib:foo` — verified), a non-executable one it ignores.
 
 : "${TASK_NAME:=unknown}"
 
@@ -101,13 +102,14 @@ have() {
 # sudo_ok — true when sudo can elevate here and now, leaving a cached timestamp
 # behind so the caller's own `sudo -n` calls succeed.
 #
-# Two situations, two answers. Unattended (CI, provisioning, a chained task —
-# stdin is not a terminal there) a password prompt is a hang, not an
-# interaction, so `sudo -n` failing means "skip this step". But at a real
-# terminal, prompting is exactly what the old repo did and what the user
-# expects — `sudo -n true` fails on any normal desktop account, so gating on it
-# alone would make install:ghostty, install:veracrypt and setup:cosmic
-# permanently inert. `sudo -v` asks once and caches.
+# Two situations, two answers. Unattended (CI, provisioning, `curl | bash`) a
+# password prompt is a hang, not an interaction, so `sudo -n` failing means
+# "skip this step". At a real terminal, prompting is what the old repo did and
+# what the user expects, and a chained task DOES inherit that terminal when
+# bootstrap is run from one (verified under a pty). Gating on `sudo -n` alone
+# would have made install:ghostty, install:veracrypt and setup:cosmic
+# permanently inert, since it fails on any normal desktop account. `sudo -v`
+# asks once and caches the timestamp for the caller's own `sudo -n` calls.
 sudo_ok() {
     command -v sudo &>/dev/null || return 1
     sudo -n true 2>/dev/null && return 0

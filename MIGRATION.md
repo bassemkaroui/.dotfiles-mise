@@ -55,11 +55,16 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   neither repo uses (fzf is a `[tools]` entry). `~/.fzf.zsh` *is* sourced by `.zshrc` and
   is kept.
 - **Every interactive prompt inside the bootstrap path** (session B). The old install tasks
-  asked "install X anyway?", "which method?", "persist this choice?"; a chained task has no
-  terminal at all — stdin is not a tty and `/dev/tty` cannot be opened (verified) — so the
-  answers now come from the profile (consent), a `--method`/`$GHOSTTY_INSTALL_METHOD`
-  choice, and a `--update` flag. `setup:cosmic-theme` keeps its menu but is no longer
-  invoked by `setup:cosmic`; run it by hand.
+  asked "install X anyway?", "which method?", "persist this choice?". A chained task *can*
+  prompt — it inherits the terminal when `mise bootstrap` is run from one (verified under a
+  pty) — but any prompt hangs an unattended run, so the answers now come from the profile
+  (consent), `--method` / `$GHOSTTY_INSTALL_METHOD`, and `--update`. `setup:cosmic-theme`
+  keeps its menu but is no longer invoked by `setup:cosmic`; run it by hand.
+- **`deb` as ghostty's default install method** — it is now `appimage` (user decision,
+  2026-07-20). The AppImage needs no sudo, no PPA and no apt at all, so it is the only
+  method that completes unattended and on a machine without root. `--method deb|source|snap`
+  still work, and `apt:software-properties-common` still ships with the profile for the deb
+  path.
 - **Automatic upgrades of ghostty/obsidian on every bootstrap.** The old tasks prompted, and
   skipped the upgrade under `DOTFILES_NONINTERACTIVE`. Without a prompt, upgrading by
   default would swap a running app's binary whenever upstream moved, so an available

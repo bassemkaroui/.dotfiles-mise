@@ -33,22 +33,33 @@ else
     if gh_curl -fSL --retry 3 --retry-delay 2 --retry-all-errors \
         -o "$tmp/FiraCode.zip" \
         "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"; then
+        # Extraction is guarded as carefully as the download: curl -f can
+        # succeed on a truncated body (proxy, partial CDN response), and an
+        # unguarded failure here would exit non-zero and abort every later
+        # step in the bootstrap chain.
+        extracted=false
         if have unzip; then
-            unzip -o "$tmp/FiraCode.zip" "FiraCodeNerdFont-Medium.ttf" -d "$FONT_DIR" \
-                || unzip -o "$tmp/FiraCode.zip" -d "$FONT_DIR"
+            if unzip -o "$tmp/FiraCode.zip" "FiraCodeNerdFont-Medium.ttf" -d "$FONT_DIR" \
+                || unzip -o "$tmp/FiraCode.zip" -d "$FONT_DIR"; then
+                extracted=true
+            fi
         elif have python3; then
-            # unzip is an [bootstrap.packages] entry, so this only matters on a
+            # unzip is a [bootstrap.packages] entry, so this only matters on a
             # machine where apt was unavailable.
-            python3 - "$tmp/FiraCode.zip" "$FONT_DIR" <<'PY'
+            if python3 - "$tmp/FiraCode.zip" "$FONT_DIR" <<'PY'; then
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
     names = [n for n in z.namelist() if "FiraCodeNerdFont-Medium.ttf" in n] or z.namelist()
     for n in names:
         z.extract(n, sys.argv[2])
 PY
+                extracted=true
+            fi
         else
             skip "Cannot extract the font archive: neither unzip nor python3 is available"
         fi
+        [[ "$extracted" == true ]] \
+            || skip "The downloaded FiraCode archive could not be extracted — re-run: mise run setup:fonts"
         have fc-cache && fc-cache -f "$FONT_DIR" >/dev/null 2>&1
         ok_changed "FiraCode Nerd Font installed to $FONT_DIR"
     else

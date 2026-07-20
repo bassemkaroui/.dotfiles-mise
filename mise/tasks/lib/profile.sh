@@ -98,12 +98,21 @@ have() {
     return 0
 }
 
-# sudo_ok — true when sudo can elevate WITHOUT prompting. Bootstrap runs
-# unattended often enough (CI, provisioning, `mise bootstrap --yes` in a
-# terminal the user walked away from) that a password prompt is a hang, not an
-# interaction. Callers warn and skip the privileged part instead.
+# sudo_ok — true when sudo can elevate here and now, leaving a cached timestamp
+# behind so the caller's own `sudo -n` calls succeed.
+#
+# Two situations, two answers. Unattended (CI, provisioning, a chained task —
+# stdin is not a terminal there) a password prompt is a hang, not an
+# interaction, so `sudo -n` failing means "skip this step". But at a real
+# terminal, prompting is exactly what the old repo did and what the user
+# expects — `sudo -n true` fails on any normal desktop account, so gating on it
+# alone would make install:ghostty, install:veracrypt and setup:cosmic
+# permanently inert. `sudo -v` asks once and caches.
 sudo_ok() {
-    command -v sudo &>/dev/null && sudo -n true 2>/dev/null
+    command -v sudo &>/dev/null || return 1
+    sudo -n true 2>/dev/null && return 0
+    [[ -t 0 ]] || return 1
+    sudo -v
 }
 
 # gh_curl <curl args...> — curl with a GitHub token attached when one is

@@ -56,7 +56,7 @@ print(next((a['browser_download_url'] for a in data.get('assets', []) if a['name
 
 [[ -n "$URL" ]] || skip "Upstream has no $ASSET for this release — install manually if you need it"
 
-sudo_ok || skip "Installing a .deb needs passwordless sudo — run 'mise run install:veracrypt' by hand"
+sudo_ok || skip "Installing a .deb needs root, and sudo cannot ask for a password here — run 'mise run install:veracrypt' in a terminal"
 
 TMP="$(mktemp -d)"
 chmod 755 "$TMP"

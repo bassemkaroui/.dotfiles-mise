@@ -30,8 +30,8 @@ fi
 ok "ddcutil available: $(ddcutil --version 2>/dev/null | head -1)"
 
 if ! sudo_ok; then
-    warn "The i2c udev rule and group need root, and sudo would prompt for a password"
-    skip "Run 'mise run setup:cosmic' from an interactive shell to finish this"
+    warn "The i2c udev rule and group need root, and sudo cannot ask for a password here"
+    skip "Run 'mise run setup:cosmic' in a terminal, where sudo can prompt"
 fi
 
 # ─── udev rule ────────────────────────────────────────────────────────────────
@@ -44,10 +44,11 @@ if [[ -f "$UDEV_RULE" ]]; then
 else
     SHIPPED="/usr/share/ddcutil/data/45-ddcutil-i2c.rules"
     if [[ -f "$SHIPPED" ]]; then
-        sudo -n cp "$SHIPPED" "$UDEV_RULE"
+        sudo -n cp "$SHIPPED" "$UDEV_RULE" || skip "Could not install the udev rule"
         ok_changed "udev rule installed from $SHIPPED"
     else
-        printf 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"\n' | sudo -n tee "$UDEV_RULE" >/dev/null
+        printf 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"\n' \
+            | sudo -n tee "$UDEV_RULE" >/dev/null || skip "Could not create $UDEV_RULE"
         ok_changed "udev rule created at $UDEV_RULE"
     fi
     udev_changed=true
@@ -60,19 +61,23 @@ USER="${USER:-$(id -un)}"
 if getent group i2c &>/dev/null; then
     ok "i2c group exists"
 else
-    sudo -n groupadd i2c
+    sudo -n groupadd i2c || skip "Could not create the i2c group"
     ok_changed "Created the i2c group"
 fi
 
 if id -nG "$USER" | grep -qw i2c; then
     ok "$USER is already in the i2c group"
 else
-    sudo -n usermod -aG i2c "$USER"
+    sudo -n usermod -aG i2c "$USER" || skip "Could not add $USER to the i2c group"
     ok_changed "Added $USER to the i2c group (log out and back in for it to take effect)"
 fi
 
 if [[ "$udev_changed" == true ]]; then
-    sudo -n udevadm control --reload-rules
-    sudo -n udevadm trigger
-    ok_changed "Reloaded udev rules"
+    # udevadm has no daemon to talk to in a container; the rule is still on
+    # disk and will apply at next boot, so this is a warning, not a failure.
+    if sudo -n udevadm control --reload-rules && sudo -n udevadm trigger; then
+        ok_changed "Reloaded udev rules"
+    else
+        warn "Could not reload udev rules — they take effect after the next reboot"
+    fi
 fi

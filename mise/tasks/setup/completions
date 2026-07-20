@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#MISE description="Generate zsh completions for tools that ship their own"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:completions"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# ~/.config/completions is on fpath (see home/.zshrc). .zshrc also refreshes
+# these files in the background on every interactive start, so this task is
+# really about the first login after a bootstrap: without it the very first
+# zsh session has no completions at all.
+COMPLETIONS_DIR="$HOME/.config/completions"
+mkdir -p "$COMPLETIONS_DIR"
+
+# "tool|command that writes a #compdef script to stdout"
+TOOLS=(
+    "mise|mise completions zsh"
+    "gh|gh completion -s zsh"
+)
+
+for entry in "${TOOLS[@]}"; do
+    tool="${entry%%|*}"
+    cmd="${entry##*|}"
+    target="$COMPLETIONS_DIR/_${tool}"
+
+    if ! command -v "$tool" &>/dev/null; then
+        warn "$tool not on PATH — skipping"
+        continue
+    fi
+
+    if [[ -s "$target" ]]; then
+        ok "_${tool} already generated"
+        continue
+    fi
+
+    if eval "$cmd" >"$target" 2>/dev/null; then
+        ok_changed "Generated _${tool}"
+    else
+        warn "Failed to generate _${tool}"
+        rm -f "$target"
+    fi
+done

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#MISE description="Wire up the private custom repo (per-user config that must stay out of this one)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:custom-hookup"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# D12. Some configuration must not live in this repo: git identity and signing
+# key, ssh host configs, per-device p10k output. In the old repo that was
+# ~/.dotfiles-custom + `mise run setup:custom-dotfiles` (stow packages with
+# tag-* dirs). The v2 shape is a machine-local drop-in: the custom repo owns
+# ~/.config/mise/conf.d/50-custom.toml, which mise loads alongside this config
+# and which may declare its own [dotfiles]/[tools] — as long as it never
+# redeclares a key this repo owns (see MIGRATION.md; conf.d files are checked
+# by `scripts/lint-config.py --live`).
+#
+# This step is the slot in the chain, deliberately thin: the full contract and
+# the adapted custom repo land in Phase 6. It runs before setup:git-signing,
+# which needs the file the custom repo deploys.
+#
+# Contract requirement (Phase 6 must honour it): install.sh has to APPLY the
+# custom repo's dotfiles before returning, not merely drop a conf.d file in
+# place. [tasks.bootstrap] runs at bootstrap step 12, long after the dotfiles
+# step (4) — so a drop-in registered here would not be applied until the *next*
+# bootstrap, and setup:git-signing (the very next step) would find no
+# ~/.gitconfig.local.example and no-op on every fresh machine.
+
+CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
+
+if [[ ! -d "$CUSTOM_DIR" ]]; then
+    info "No custom repo at $CUSTOM_DIR — skipping"
+    info "(clone it there, or set \$DOTFILES_CUSTOM_MISE_DIR, then re-run this task)"
+    exit 0
+fi
+
+if [[ ! -x "$CUSTOM_DIR/install.sh" ]]; then
+    warn "$CUSTOM_DIR exists but has no executable install.sh — nothing to run"
+    warn "(the custom-repo contract is defined in MIGRATION.md; it lands in Phase 6)"
+    exit 0
+fi
+
+info "Running $CUSTOM_DIR/install.sh"
+"$CUSTOM_DIR/install.sh"
+ok "Custom repo hookup complete"

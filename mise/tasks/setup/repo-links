@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#MISE description="Link files that live inside bootstrap-cloned repos (oh-my-tmux conf, fpp)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:repo-links"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# These two links point INTO repos cloned by [bootstrap.repos]. They are tasks
+# rather than [dotfiles] entries on purpose:
+#
+#   A [dotfiles] entry whose explicit source does not exist aborts the entire
+#   apply — every other dotfile included, not just that entry (verified on mise
+#   2026.7.7). install.sh's first pass runs `bootstrap --only dotfiles` before
+#   any repo is cloned, so declaring these as dotfiles would brick a fresh
+#   install, and removing ~/.tmux on an existing machine would stop .zshrc and
+#   friends from ever applying again.
+#
+# Linking here instead keeps the failure local: a missing clone is a warning.
+
+link() {
+    local src="$1" dst="$2" what="$3"
+    if [[ ! -e "$src" ]]; then
+        warn "$what: $src not found — skipping (is the repo cloned? mise bootstrap repos status)"
+        return 0
+    fi
+    mkdir -p "$(dirname "$dst")"
+    if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
+        ok "$what already linked"
+        return 0
+    fi
+    if [[ -e "$dst" && ! -L "$dst" ]]; then
+        warn "$what: $dst exists and is not a symlink — leaving it alone"
+        return 0
+    fi
+    ln -sfn "$src" "$dst"
+    ok_changed "$what: $dst -> $src"
+}
+
+# oh-my-tmux. Its .tmux.conf resolves its companion .local file from the
+# directory of whichever conf tmux loaded ($HOME/.tmux.conf,
+# $XDG_CONFIG_HOME/tmux/tmux.conf, ~/.config/tmux/tmux.conf — first match
+# wins), so ~/.config/tmux/tmux.conf.local (a [dotfiles] entry) is what this
+# link activates.
+link "$HOME/.tmux/.tmux.conf" "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf" "oh-my-tmux config"
+
+# PathPicker (fpp) — replaces the old install:pathpicker task; the clone itself
+# is now a [bootstrap.repos] entry.
+link "$HOME/.local/opt/PathPicker/fpp" "$HOME/.local/bin/fpp" "PathPicker (fpp)"

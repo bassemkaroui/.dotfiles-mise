@@ -109,6 +109,21 @@ def check_sources(rel: str, data: dict, problems: list[str]) -> None:
             problems.append(f"MISSING SOURCE: [dotfiles] {key!r} in {rel} -> {source}")
 
 
+def dotfiles_root() -> str:
+    """`dotfiles.root` as declared in the repo's config.toml (not hardcoded).
+
+    Sourceless entries mirror their home-relative target under it, so the lint
+    below has to resolve against the same value mise will use.
+    """
+    settings = _load(os.path.join(MISE_DIR, SELF_MANAGED_OWNER)).get("settings", {})
+    root = settings.get("dotfiles", {}).get("root") if isinstance(settings, dict) else None
+    if not isinstance(root, str):
+        return os.path.join(REPO, "home")
+    if root.startswith("~/.dotfiles-mise/"):
+        return os.path.join(REPO, root[len("~/.dotfiles-mise/") :])
+    return os.path.expanduser(root)
+
+
 def check_repo_sources(rel: str, data: dict, problems: list[str]) -> None:
     """Every [dotfiles] entry must have a source that exists in this repo.
 
@@ -128,7 +143,7 @@ def check_repo_sources(rel: str, data: dict, problems: list[str]) -> None:
     verified from a checkout — and belong in a task anyway, precisely because
     of the abort-the-whole-apply behaviour above.
     """
-    root = os.path.join(REPO, "home")
+    root = dotfiles_root()
     for key, value in extract("dotfiles", data).items():
         source = value.get("source") if isinstance(value, dict) else value
         if isinstance(source, str):
@@ -205,10 +220,12 @@ def main() -> int:
         # D9a applies in both modes — machine-local drop-ins are the least
         # reviewed files on the box, so they get the same check.
         check_self_managed(path, rel, data, problems)
+        # check_repo_sources covers sourceless entries (silently dropped by
+        # mise) and repo-relative ones; check_sources covers absolute/machine
+        # paths, which only exist — and can only be stat'ed — on a real machine.
+        check_repo_sources(rel, data, problems)
         if args.live:
             check_sources(rel, data, problems)
-        else:
-            check_repo_sources(rel, data, problems)
 
     if not args.live:
         core = os.path.join(MISE_DIR, SELF_MANAGED_OWNER)

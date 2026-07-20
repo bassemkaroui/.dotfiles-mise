@@ -20,13 +20,29 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #
 # Linking here instead keeps the failure local: a missing clone is a warning.
 
+OLD_REPO="${DOTFILES_OLD_REPO:-$HOME/.dotfiles}"
+
 link() {
-    local src="$1" dst="$2" what="$3"
+    local src="$1" dst="$2" what="$3" parent old_real
     if [[ ! -e "$src" ]]; then
         warn "$what: $src not found — skipping (is the repo cloned? mise bootstrap repos status)"
         return 0
     fi
-    mkdir -p "$(dirname "$dst")"
+    # Never write through the OLD repo's stow deployment. ~/.config/tmux is a
+    # directory symlink into ~/.dotfiles on a machine that hasn't unstowed yet,
+    # and the file we'd replace there (tmux.conf -> ../../.tmux/.tmux.conf) is
+    # git-tracked in that repo. install.sh refuses to run in that state, but
+    # this task is also reachable standalone and through a bare `mise bootstrap`.
+    parent="$(dirname "$dst")"
+    if [[ -d "$OLD_REPO" && -e "$parent" ]]; then
+        old_real="$(readlink -f "$OLD_REPO")"
+        if [[ "$(readlink -f "$parent")" == "$old_real"/* ]]; then
+            warn "$what: $parent resolves into the old dotfiles repo ($OLD_REPO) — refusing"
+            warn "Unstow the old repo first (MIGRATION.md step 3), then re-run this task"
+            return 0
+        fi
+    fi
+    mkdir -p "$parent"
     if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
         ok "$what already linked"
         return 0

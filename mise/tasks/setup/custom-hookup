@@ -43,5 +43,13 @@ if [[ ! -x "$CUSTOM_DIR/install.sh" ]]; then
 fi
 
 info "Running $CUSTOM_DIR/install.sh"
-"$CUSTOM_DIR/install.sh"
-ok "Custom repo hookup complete"
+# Third-party code in the middle of a five-step chain: a non-zero exit would
+# take setup:completions, setup:git-signing and setup:login-shell-fallback down
+# with it and fail the whole bootstrap. Every other step in the chain degrades
+# to a warning; this one must too.
+if "$CUSTOM_DIR/install.sh"; then
+    ok "Custom repo hookup complete"
+else
+    warn "$CUSTOM_DIR/install.sh failed (rc=$?) — continuing with the rest of the bootstrap"
+    warn "(re-run it on its own once fixed: mise run setup:custom-hookup)"
+fi

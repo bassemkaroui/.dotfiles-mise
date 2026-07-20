@@ -28,7 +28,10 @@ otherwise rather than half-deploy.
    backing up a pre-existing global config).
 4. Seeds the per-machine `~/.config/mise/miserc.toml` (profile selection) — pass
    `DOTFILES_PROFILES=graphical,ai,dev` or answer the prompt.
-5. `mise trust`, moves conflicting real dotfile targets aside to `<file>.pre-mise.bak`
+5. Refuses to continue if any `[dotfiles]` target or `[bootstrap.repos]` path still resolves
+   into the old `~/.dotfiles` stow deployment (unstow it first — see
+   [MIGRATION.md](MIGRATION.md) step 3). Needs `python3`.
+6. `mise trust`, moves conflicting real dotfile targets aside to `<file>.pre-mise.bak`
    (e.g. the stock `~/.bashrc` on a fresh account), then runs `mise bootstrap` with
    `MISE_GLOBAL_CONFIG_FILE` pointed at the repo — the one-time nudge mise needs before its
    own config is linked into place.
@@ -104,6 +107,12 @@ Per-machine state lives **outside** the repo, in the real `~/.config/mise/`:
   profile-gated logic lives in tasks, which do see it.
 - **Sensitive dirs are never whole-dir symlinks** (`~/.gnupg`, `~/.config/gh`, `~/.claude`,
   `~/.ssh`) so live tokens/keys can't land in the repo tree.
+- **No `[dotfiles]` source may point at something bootstrap creates.** An entry whose explicit
+  source is missing aborts the *entire* apply, and the first-run pass applies dotfiles before
+  cloning repos — so links into `~/.tmux` and `~/.local/opt/PathPicker` are made by the
+  `setup:repo-links` task, where a missing clone is only a warning. `scripts/lint-config.py`
+  checks every entry's source exists, because mise silently ignores a missing *sourceless*
+  one (it never deploys and `dotfiles status --missing` still exits 0).
 - **mise's own config is self-managed.** `mise/config.toml` declares two `[dotfiles]` entries
   (absolute sources, `config*.toml` glob + `tasks`) that link the repo's config into
   `~/.config/mise/`. Adding a profile file and running `mise dotfiles apply` from anywhere

@@ -3,8 +3,19 @@
 # manual override file): a machine now opts in by listing `graphical` in
 # ~/.config/mise/miserc.toml.
 #
-# Phase 3b adds the install tasks (ghostty, obsidian) and setup:fonts;
-# Phase 4 adds the desktop-environment profiles (gnome, cosmic).
+# The tasks this profile gates — setup:fonts, install:ghostty,
+# install:obsidian — call `require_profile graphical` themselves, so they are
+# listed unconditionally in config.toml's [tasks.bootstrap] chain.
+
+[bootstrap.packages]
+# fc-cache, so a freshly installed Nerd Font is actually visible to terminals
+# (setup:fonts). Most desktops pull it in already; explicit because a minimal
+# graphical install may not.
+"apt:fontconfig" = "latest"
+# add-apt-repository, for install:ghostty's default deb path — mise's apt
+# manager installs packages but cannot add a PPA. The task also installs it on
+# demand, for machines that choose a different install method.
+"apt:software-properties-common" = "latest"
 
 [dotfiles]
 # Ghostty 1.3.1 loads BOTH ~/.config/ghostty/config and ~/.config/ghostty/

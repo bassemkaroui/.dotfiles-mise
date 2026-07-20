@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+#MISE description="Install the Nerd Font powerlevel10k needs and point terminals at it"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:fonts"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's setup:zsh Phase 5 font half. p10k's committed
+# ~/.p10k.zsh assumes a Nerd Font: without one the prompt renders as tofu on
+# every login, which is why this is a bootstrap step and not a manual chore.
+require_profile graphical
+
+NERD_FONT="FiraCode Nerd Font Medium"
+NERD_FONT_SIZE=12
+FONT_DIR="$HOME/.local/share/fonts"
+FONT_FILE="$FONT_DIR/FiraCodeNerdFont-Medium.ttf"
+
+# ─── The font itself ──────────────────────────────────────────────────────────
+
+if [[ -f "$FONT_FILE" ]]; then
+    ok "FiraCode Nerd Font already installed"
+else
+    info "Installing FiraCode Nerd Font ..."
+    mkdir -p "$FONT_DIR"
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+
+    # Nerd Fonts release zips are on GitHub; gh_curl attaches a token when one
+    # is around so a rate-limited machine still gets its font.
+    if gh_curl -fSL --retry 3 --retry-delay 2 --retry-all-errors \
+        -o "$tmp/FiraCode.zip" \
+        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"; then
+        if have unzip; then
+            unzip -o "$tmp/FiraCode.zip" "FiraCodeNerdFont-Medium.ttf" -d "$FONT_DIR" \
+                || unzip -o "$tmp/FiraCode.zip" -d "$FONT_DIR"
+        elif have python3; then
+            # unzip is an [bootstrap.packages] entry, so this only matters on a
+            # machine where apt was unavailable.
+            python3 - "$tmp/FiraCode.zip" "$FONT_DIR" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    names = [n for n in z.namelist() if "FiraCodeNerdFont-Medium.ttf" in n] or z.namelist()
+    for n in names:
+        z.extract(n, sys.argv[2])
+PY
+        else
+            skip "Cannot extract the font archive: neither unzip nor python3 is available"
+        fi
+        have fc-cache && fc-cache -f "$FONT_DIR" >/dev/null 2>&1
+        ok_changed "FiraCode Nerd Font installed to $FONT_DIR"
+    else
+        # Network failures must not abort the bootstrap chain (see lib/profile.sh).
+        skip "Could not download FiraCode Nerd Font — re-run later: mise run setup:fonts"
+    fi
+fi
+
+# ─── Terminal font wiring ─────────────────────────────────────────────────────
+#
+# Ghostty is configured declaratively instead (home/.config/ghostty/), so it is
+# absent here. These three write into config files/registries mise cannot
+# declare, and each is a no-op when the terminal isn't installed.
+
+# GNOME Terminal / Tilix (dconf).
+if have gnome-terminal; then
+    if ! have dconf; then
+        warn "gnome-terminal is installed but dconf is not — cannot set its font"
+        warn "(dconf-cli ships with the 'gnome' profile; add it in ${CONF}/miserc.toml)"
+    elif [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        # Expected over ssh/su: dconf still exits 0 but writes nowhere useful.
+        warn "No DBUS session — skipping GNOME Terminal font (re-run from a desktop session)"
+    else
+        profiles="$(dconf list /org/gnome/terminal/legacy/profiles:/ 2>/dev/null | grep '^:' | tr -d '/:' || true)"
+        # The well-known default profile UUID, used when dconf lists none yet.
+        [[ -z "$profiles" ]] && profiles="b1dcc9dd-5262-4d8d-a863-c897e6d979b9"
+        for p in $profiles; do
+            key="/org/gnome/terminal/legacy/profiles:/:${p}/font"
+            current="$(dconf read "$key" 2>/dev/null | tr -d "'")"
+            if [[ "$current" == "${NERD_FONT} ${NERD_FONT_SIZE}" ]]; then
+                ok "GNOME Terminal profile ${p} already using ${NERD_FONT}"
+            else
+                dconf write "$key" "'${NERD_FONT} ${NERD_FONT_SIZE}'"
+                dconf write "/org/gnome/terminal/legacy/profiles:/:${p}/use-system-font" "false"
+                # dconf exits 0 even when it had nowhere to persist the write
+                # (verified in a fake-$HOME sandbox: write succeeds, read-back
+                # is empty, the real database is untouched — dconf resolves its
+                # writable backend through the session bus, not $XDG_CONFIG_HOME).
+                # Reading back is the only way to tell "set it" from "said so".
+                if [[ "$(dconf read "$key" 2>/dev/null | tr -d "'")" == "${NERD_FONT} ${NERD_FONT_SIZE}" ]]; then
+                    ok_changed "Set font for GNOME Terminal profile ${p}"
+                else
+                    warn "dconf accepted the font for profile ${p} but did not persist it"
+                    warn "(no writable dconf backend in this session — re-run from a desktop login)"
+                fi
+            fi
+        done
+    fi
+fi
+
+# Alacritty.
+if have alacritty; then
+    cfg="$HOME/.config/alacritty/alacritty.toml"
+    mkdir -p "$(dirname "$cfg")"
+    if [[ -f "$cfg" ]] && grep -q 'family' "$cfg" 2>/dev/null; then
+        current="$(grep 'family' "$cfg" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+        if [[ "$current" == "$NERD_FONT" ]]; then
+            ok "Alacritty already using ${NERD_FONT}"
+        else
+            sed -i "s/family = .*/family = \"${NERD_FONT}\"/" "$cfg"
+            ok_changed "Set font in Alacritty config"
+        fi
+    else
+        printf '\n[font.normal]\nfamily = "%s"\nsize = %s\n' "$NERD_FONT" "$NERD_FONT_SIZE" >>"$cfg"
+        ok_changed "Set font in Alacritty config"
+    fi
+fi
+
+# Kitty.
+if have kitty; then
+    cfg="$HOME/.config/kitty/kitty.conf"
+    mkdir -p "$(dirname "$cfg")"
+    if [[ -f "$cfg" ]] && grep -q '^font_family' "$cfg" 2>/dev/null; then
+        current="$(grep '^font_family' "$cfg" | head -1 | sed 's/^font_family //')"
+        if [[ "$current" == "$NERD_FONT" ]]; then
+            ok "Kitty already using ${NERD_FONT}"
+        else
+            sed -i "s/^font_family .*/font_family ${NERD_FONT}/" "$cfg"
+            ok_changed "Set font in Kitty config"
+        fi
+    else
+        printf '\nfont_family %s\nfont_size %s\n' "$NERD_FONT" "$NERD_FONT_SIZE" >>"$cfg"
+        ok_changed "Set font in Kitty config"
+    fi
+fi

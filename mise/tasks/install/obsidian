@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#MISE description="Install Obsidian (AppImage) — graphical profile"
+#MISE raw=true
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:obsidian"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/obsidian.sh
+source "$LIB/obsidian.sh"
+
+# Port of the old repo's install:obsidian. Gone: the .graphical-env detection,
+# the .install-exclude registry, and the "Install Obsidian? [Y/n]" prompt —
+# selecting the `graphical` profile IS the consent, and a prompt cannot work
+# inside [tasks.bootstrap] anyway (stdin is not a terminal there). As with
+# ghostty, an available upgrade is reported and only applied with --update, so
+# a routine `mise bootstrap` never replaces a running editor's binary.
+require_profile graphical
+
+DO_UPDATE="${usage_update:-false}"
+
+CURRENT="$(obsidian_installed_version)"
+[[ -n "$CURRENT" ]] && ok "Obsidian installed: $CURRENT"
+
+obsidian_fetch_release || skip "Could not reach the GitHub releases API"
+LATEST="$(obsidian_latest_version)"
+[[ -n "$LATEST" ]] || skip "Could not determine the latest Obsidian version"
+ok "Latest Obsidian release: $LATEST"
+
+if [[ -n "$CURRENT" ]]; then
+    if [[ "$CURRENT" == "$LATEST" ]]; then
+        ok "Obsidian is up to date ($CURRENT)"
+        exit 0
+    fi
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        info "Obsidian $CURRENT installed; $LATEST is available"
+        info "(upgrade with: mise run install:obsidian --update)"
+        exit 0
+    fi
+    info "Upgrading Obsidian $CURRENT → $LATEST ..."
+fi
+
+obsidian_install_appimage "$LATEST" "$(obsidian_appimage_url)"
+
+[[ -x "$OBSIDIAN_BIN" ]] || fail "Obsidian install finished but $OBSIDIAN_BIN is not executable"
+ok "Obsidian ready: $OBSIDIAN_BIN ($(obsidian_installed_version))"

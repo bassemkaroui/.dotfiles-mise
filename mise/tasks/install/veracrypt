@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#MISE description="Install the VeraCrypt console .deb matching this Ubuntu release"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:veracrypt"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Port of the old repo's install:veracrypt. VeraCrypt was default-on there with
+# an .install-exclude opt-out; it is now opt-in via this profile (user decision
+# §7.3). The .deb is per-Ubuntu-release, so "no asset for this release" is a
+# routine outcome on a newer/non-LTS host — it warns and skips rather than
+# aborting the bootstrap chain.
+require_profile veracrypt
+
+have dpkg-query dpkg curl python3 || skip "Needs dpkg/curl/python3 — not a Debian-family machine?"
+
+# shellcheck source=/dev/null
+source /etc/os-release
+
+INSTALLED="$(dpkg-query -W -f='${Version}' veracrypt-console 2>/dev/null \
+    || dpkg-query -W -f='${Version}' veracrypt 2>/dev/null \
+    || true)"
+ARCH="$(dpkg --print-architecture)"
+
+RELEASE_JSON="$(gh_curl -fsSL "https://api.github.com/repos/veracrypt/VeraCrypt/releases/latest" 2>/dev/null || true)"
+[[ -n "$RELEASE_JSON" ]] || skip "Could not reach the GitHub releases API"
+TAG="$(printf '%s' "$RELEASE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || true)"
+VERSION="${TAG#VeraCrypt_}"
+[[ -n "$VERSION" ]] || skip "Could not determine the latest VeraCrypt version"
+
+# e.g. "1.26.24-1~ubuntu22.04-1" → "1.26.24"
+if [[ "${INSTALLED%%-*}" == "$VERSION" ]]; then
+    ok "VeraCrypt $VERSION already installed"
+    exit 0
+fi
+
+# VeraCrypt's pre-removal script aborts an upgrade while a volume is mounted
+# (it would pull the device out from under a live mount). `veracrypt --text
+# --list` exits 0 only when at least one volume is mounted; catching that here
+# beats letting dpkg fail half-way and leave the package unconfigured.
+if have veracrypt && veracrypt --text --list &>/dev/null; then
+    warn "VeraCrypt volume(s) are mounted — not upgrading to $VERSION"
+    skip "Dismount them ('veracrypt -t -d') and re-run: mise run install:veracrypt"
+fi
+
+ASSET="veracrypt-console-${VERSION}-Ubuntu-${VERSION_ID}-${ARCH}.deb"
+URL="$(printf '%s' "$RELEASE_JSON" | ASSET="$ASSET" python3 -c "
+import json, os, sys
+data = json.load(sys.stdin)
+name = os.environ['ASSET']
+print(next((a['browser_download_url'] for a in data.get('assets', []) if a['name'] == name), ''))
+" 2>/dev/null || true)"
+
+[[ -n "$URL" ]] || skip "Upstream has no $ASSET for this release — install manually if you need it"
+
+sudo_ok || skip "Installing a .deb needs passwordless sudo — run 'mise run install:veracrypt' by hand"
+
+TMP="$(mktemp -d)"
+chmod 755 "$TMP"
+trap 'rm -rf "$TMP"' EXIT
+info "Downloading $ASSET ..."
+curl -fL -o "$TMP/$ASSET" "$URL" || skip "Download failed: $URL"
+
+info "Installing (sudo) ..."
+sudo -n apt-get install -y -f "$TMP/$ASSET" || skip "apt-get could not install $ASSET — install manually: $URL"
+ok_changed "VeraCrypt $VERSION installed"
+
+# "veracrypt" (no -console suffix) is the legacy package name; purging it does
+# not touch the newly installed veracrypt-console.
+if dpkg-query -W veracrypt &>/dev/null 2>&1; then
+    info "Removing the legacy veracrypt package ..."
+    sudo -n apt-get purge -y veracrypt || warn "Could not purge the legacy veracrypt package"
+fi

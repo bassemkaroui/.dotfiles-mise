@@ -37,19 +37,44 @@ cd "$REPO"
 # Tasks are extensionless files; lib/ holds *.sh helpers and *.py helpers.
 # __pycache__ is gitignored but present on any machine that ran the cosmic
 # theme helper, and a .pyc is not a shell script.
+#
+# Outside mise/tasks the set used to be three hardcoded literals (install.sh,
+# sandbox/mkhome.sh, docs/fetch.sh). It happened to be complete, but a new
+# scripts/deploy.sh or sandbox/helpers.sh would have been silently unchecked —
+# the same shape as the old repo's lint task, whose glob matched nothing at
+# all. Discover by extension AND by shebang instead, so a new script is in the
+# set the moment it exists.
 mapfile -t SHELL_FILES < <(
-    find mise/tasks -type f \
-        ! -name '*.py' \
-        ! -name '*.pyc' \
-        ! -path '*/__pycache__/*' \
-        | sort
-    printf '%s\n' install.sh sandbox/mkhome.sh docs/fetch.sh
+    {
+        find mise/tasks -type f \
+            ! -name '*.py' \
+            ! -name '*.pyc' \
+            ! -path '*/__pycache__/*'
+        # Everything else in the repo's machinery: *.sh anywhere outside home/
+        # and docs/upstream/, plus any extensionless file with a shell shebang.
+        # No `-type f` before the prune group: -prune only takes effect on a
+        # DIRECTORY, so an earlier `-type f` silently disables every exclusion.
+        find . \
+            \( -path ./.git -o -path ./home -o -path ./docs/upstream -o -path ./mise/tasks \) -prune \
+            -o -type f -print \
+            | while IFS= read -r f; do
+                case "$f" in
+                    *.sh) printf '%s\n' "${f#./}" ;;
+                    *.py | *.pyc | *.toml | *.md | *.json | *.yml | *.yaml) ;;
+                    *) head -c 40 "$f" 2>/dev/null | head -1 | grep -qE '^#!.*(bash|sh)\b' \
+                        && printf '%s\n' "${f#./}" ;;
+                esac
+            done
+    } | sort -u
 )
 mapfile -t PY_FILES < <(
-    find scripts mise/tasks -type f -name '*.py' ! -path '*/__pycache__/*' | sort
+    find . -type f -name '*.py' \
+        ! -path './.git/*' ! -path './docs/upstream/*' ! -path '*/__pycache__/*' \
+        | sed 's|^\./||' | sort
 )
 
 ((${#SHELL_FILES[@]} > 0)) || fail "No shell files discovered — wrong cwd?"
+((${#PY_FILES[@]} > 0)) || fail "No python files discovered — wrong cwd?"
 
 status=0
 step_failed() {
@@ -74,6 +99,11 @@ if have python3; then
             || step_failed "python syntax error in $f"
     done
     ok "python syntax OK (${#PY_FILES[@]} files)"
+elif [[ -n "${CI:-}" ]]; then
+    # Same reasoning as shellcheck below and the syntax checks further down: a
+    # silently skipped check in CI is worse than no check, because it reports
+    # green. This branch used to warn and carry on with status 0.
+    step_failed "python3 not found, but CI must run every check (apt-get install -y python3)"
 else
     warn "python3 not found — skipping the config lint and python syntax checks"
 fi
@@ -95,22 +125,56 @@ SHFMT_VERSION="v3.10.0"
 SHFMT_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-lint"
 SHFMT_BIN="$SHFMT_CACHE/shfmt-${SHFMT_VERSION}"
 
-if have shfmt; then
+# Upstream sha256sums.txt for the pinned release. The download used to be
+# chmod +x'd and executed unverified: `curl -f` rejects a connection error but
+# not a 200 with a truncated or substituted body, and once a bad file is cached
+# it is trusted forever. Formatting decides what lands in every committed
+# script, so the binary making them gets checked.
+# shellcheck disable=SC2034  # read indirectly, as ${!want}, once $asset is known
+SHFMT_SHA256_linux_amd64="1f57a384d59542f8fac5f503da1f3ea44242f46dff969569e80b524d64b71dbc"
+# shellcheck disable=SC2034  # ditto
+SHFMT_SHA256_linux_arm64="9d23013d56640e228732fd2a04a9ede0ab46bc2d764bf22a4a35fb1b14d707a8"
+
+# `have shfmt` alone was enough to use whatever was on PATH — no version
+# comparison anywhere — so the "pin" was advisory: a different shfmt (or a stub
+# that exits 0) silently replaced the formatting gate. Require the pinned
+# version, and fall through to the cached/downloaded copy otherwise.
+shfmt_is_pinned() { # <binary>
+    [[ "$("$1" --version 2>/dev/null | tr -d '[:space:]')" == "$SHFMT_VERSION" ]]
+}
+
+if have shfmt && shfmt_is_pinned "$(command -v shfmt)"; then
     SHFMT="$(command -v shfmt)"
-elif [[ -x "$SHFMT_BIN" ]]; then
+elif [[ -x "$SHFMT_BIN" ]] && shfmt_is_pinned "$SHFMT_BIN"; then
     SHFMT="$SHFMT_BIN"
 else
-    info "shfmt $SHFMT_VERSION not on PATH — downloading to $SHFMT_BIN"
+    if have shfmt; then
+        info "shfmt on PATH is $(shfmt --version 2>/dev/null || echo unknown), not the pinned $SHFMT_VERSION"
+    fi
+    info "fetching the pinned shfmt $SHFMT_VERSION to $SHFMT_BIN"
     mkdir -p "$SHFMT_CACHE"
     case "$(uname -m)" in
         x86_64) asset="linux_amd64" ;;
         aarch64 | arm64) asset="linux_arm64" ;;
-        *) fail "No pinned shfmt build for $(uname -m) — install shfmt manually" ;;
+        *) fail "No pinned shfmt build for $(uname -m) — install shfmt $SHFMT_VERSION manually" ;;
     esac
-    curl -fsSL -o "$SHFMT_BIN" \
+    tmp_shfmt="$SHFMT_BIN.partial.$$"
+    curl -fsSL -o "$tmp_shfmt" \
         "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_${asset}" \
-        || fail "Could not download shfmt — install it manually and retry"
-    chmod +x "$SHFMT_BIN"
+        || {
+            rm -f "$tmp_shfmt"
+            fail "Could not download shfmt — install it manually and retry"
+        }
+    want="SHFMT_SHA256_${asset}"
+    got="$(sha256sum "$tmp_shfmt" | cut -d' ' -f1)"
+    if [[ "$got" != "${!want}" ]]; then
+        rm -f "$tmp_shfmt"
+        fail "shfmt $SHFMT_VERSION checksum mismatch (got $got, want ${!want}) — refusing to run it"
+    fi
+    chmod +x "$tmp_shfmt"
+    # Only now does it become the cached copy, so an interrupted or corrupt
+    # download can never be picked up by the next run.
+    mv -f "$tmp_shfmt" "$SHFMT_BIN"
     SHFMT="$SHFMT_BIN"
 fi
 
@@ -139,11 +203,21 @@ syntax_check() {
         fi
         return 0
     fi
+    # A missing file used to be skipped silently while the OK line still
+    # counted it ("$#" is the argument count, not the checked count), so
+    # renaming or deleting every rc file here reported "zsh -n passed (5
+    # files)". These paths are the deployed login-shell files; if one is gone,
+    # that is the bug, not a reason to check less.
+    local checked=0
     for f in "$@"; do
-        [[ -f "$f" ]] || continue
+        if [[ ! -f "$f" ]]; then
+            step_failed "$checker -n: $f is listed here but does not exist (renamed or deleted?)"
+            continue
+        fi
         "$checker" -n "$f" || step_failed "$checker -n failed: $f"
+        checked=$((checked + 1))
     done
-    ok "$checker -n passed ($# files)"
+    ok "$checker -n passed ($checked/$# files)"
 }
 syntax_check bash \
     home/.bashrc home/.profile home/.bash_logout \

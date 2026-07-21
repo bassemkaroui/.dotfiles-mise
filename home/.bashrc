@@ -146,5 +146,14 @@ if command -v gh &>/dev/null && gh auth status &>/dev/null; then
     export GITHUB_TOKEN="$(gh auth token 2>/dev/null)"
 fi
 
-# Machine-local overlay (never committed)
-[ -f ~/.bashrc.local ] && . ~/.bashrc.local
+# Machine-local overlay (never committed).
+#
+# An `if`, not `[ -f x ] && . x`: as the LAST statement of an rc file the &&
+# form leaves $? = 1 whenever the file is absent — i.e. on every fresh machine
+# — and .bashrc is the last thing bash reads before the first prompt, so a
+# prompt that renders exit status shows a permanent phantom error. Identical
+# bug to the one fixed in .zshrc (8baf469); it survived here because CI
+# smoke-tested only zsh. It now smoke-tests both, under a pty.
+if [ -f ~/.bashrc.local ]; then
+    . ~/.bashrc.local
+fi

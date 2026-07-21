@@ -145,6 +145,13 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - **mise creates missing parent directories with the process umask** (0755/0775), which gpg
   rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
   change the mode afterwards.
+- **`git config --global` writes THROUGH a symlink.** git resolves a symlinked
+  `~/.gitconfig` and rewrites its target: the link survives, the repo file changes. With
+  this repo public, one `git config --global user.email`, `gh auth login` or
+  `git lfs install` would have put private values in a tracked file. `~/.gitconfig` is
+  therefore deployed with `mode = "copy"`, which is what dotfiles.md recommends for
+  configs a tool rewrites in place — at the cost that a local `git config --global` is
+  reverted by the next apply. Per-machine git settings belong in `~/.gitconfig.local`.
 - **`mode = "template"` overwrites a pre-existing real file silently** — no error, no backup,
   where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target,
   not just symlink-mode ones, and additionally backs up every target the companion repo
@@ -205,11 +212,19 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 1. `cd ~/.dotfiles && git pull` — make sure the old repo is current, commit any local changes.
 2. Back up (`-h` dereferences the stow symlinks so the archive stores real content, not
    dangling links):
-   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.bash_logout ~/.profile ~/.p10k.zsh ~/.fzf.zsh ~/.gitconfig* ~/.git-completion.bash ~/.git-prompt.sh ~/.git-template ~/.ssh/config ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp ~/.themes ~/.local/share/{fonts,gnome-extensions,applications/obsidian.desktop} 2>/dev/null`
+   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.bash_logout ~/.profile ~/.p10k.zsh ~/.fzf.zsh ~/.gitconfig* ~/.git-completion.bash ~/.git-prompt.sh ~/.git-template ~/.ssh/config ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions,nvim} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp ~/.themes ~/.local/share/{fonts,gnome-extensions,applications/obsidian.desktop} 2>/dev/null`
    Every one of those is a `[dotfiles]` target now, i.e. a candidate for
    `install.sh`'s move-aside. `~/.ssh/config` and `~/.gitconfig*` matter most: the first is
    deployed in **template** mode, which overwrites a real file with no error and no backup of
    its own, and the second is where your git identity lives.
+   `~/.config/nvim` is in the list for a different reason: it is not a `[dotfiles]` target
+   but a **`[bootstrap.repos]` clone** under the `neovim` profile, so the cutover replaces
+   whatever is there with a fresh clone of `custom_config`.
+2b. **Push the nvim submodule first.** `~/.dotfiles/nvim/tag-default/.config/nvim` is a
+   submodule with its own history, and any commit that exists only locally is not on
+   `origin/custom_config` — the branch the new repo clones. Check with
+   `git -C ~/.dotfiles/nvim/tag-default/.config/nvim status -sb` and push before cutting
+   over; the backup tar above is the safety net, not the plan.
 3. Unstow everything with **both** old repos (this restores their `.bak` backups):
    for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
    `.device-tag`). The `mise` package last. Then the companion:

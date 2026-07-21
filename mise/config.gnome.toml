@@ -1,4 +1,5 @@
-# Profile: gnome — GTK/shell themes and GNOME Shell extensions. Replaces the
+# Profile: gnome — GNOME Shell extensions and dconf (the GTK themes this once
+# carried are gone; see the note below). Replaces the
 # old repo's `.desktop-env` detection + the DE auto-exclude that dropped the
 # gnome_themes stow package on a non-GNOME machine: a machine now opts in by
 # listing `gnome` in ~/.config/mise/miserc.toml.

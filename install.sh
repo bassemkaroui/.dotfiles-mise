@@ -300,35 +300,43 @@ if [[ -f "$CUSTOM_CONF" ]]; then
         ok "Linked the companion repo: $DROPIN -> $CUSTOM_CONF"
     fi
 
-    # ONLY on the run that creates the link. A template-mode target is a real
-    # file once rendered, so an unconditional pass re-archives ~/.ssh/config on
-    # every single run — CI's idempotency check caught exactly that
-    # (`config.pre-mise.bak1` appearing on run 2). Afterwards, drift is
-    # backup_conflicts' job, and it keys on `state: differs`, which a
-    # freshly-rendered file does not have. Same reasoning as the task's
-    # FIRST_LINK gate.
-    #
-    # Back up what the companion is about to deploy, keyed on its config file
-    # rather than on `mise dotfiles status`. The status view of a just-created
-    # drop-in proved unreliable — observed in repeated sandbox runs of
-    # setup:custom-hookup, where status omitted the new entries while the apply
-    # moments later honoured them — and the entry it would miss is the
-    # template-mode ~/.ssh/config, which overwrites a real file with no error
-    # and no backup (§2.26). backup_conflicts further down still runs, and
-    # still covers drift on later runs.
-    if [[ -n "${LINKED_DROPIN:-}" ]]; then
-        while IFS= read -r target; do
-            [[ -n "$target" ]] || continue
-            expanded="${target/#\~/$HOME}"
-            [[ -e "$expanded" && ! -L "$expanded" ]] || continue
-            bak="$expanded.pre-mise.bak"
-            n=1
-            while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
-            warn "Backing up $target -> $bak (declared by the companion repo)"
-            mv "$expanded" "$bak" || warn "Could not move $expanded aside"
-        done < <(python3 "$REPO/scripts/dotfiles-targets.py" "$CUSTOM_CONF" || true)
-    fi
+    # The backup itself is DEFERRED to backup_companion_targets(), called after
+    # guard_old_repo further down. Doing it here moved files before that guard
+    # had run, so on a machine still carrying the old stow deployment a
+    # companion target that is a real file underneath an old-repo directory
+    # symlink would have been mv'd INSIDE the rollback path — the one thing
+    # this script promises never to do. Linking early is still right (the lint,
+    # the guard and the conflict backup all need to see the companion's
+    # entries); only the mutation waits.
 fi
+
+# ONLY on the run that creates the link. A template-mode target is a real file
+# once rendered, so an unconditional pass re-archives ~/.ssh/config on every
+# single run — CI's idempotency check caught exactly that (`config.pre-mise.bak1`
+# appearing on run 2). Afterwards, drift is backup_conflicts' job, and it keys
+# on `state: differs`, which a freshly-rendered file does not have. Same
+# reasoning as the task's FIRST_LINK gate.
+#
+# Keyed on the companion's config file rather than on `mise dotfiles status`:
+# the status view of a just-created drop-in proved unreliable — observed in
+# repeated sandbox runs of setup:custom-hookup, where status omitted the new
+# entries while the apply moments later honoured them — and the entry it would
+# miss is the template-mode ~/.ssh/config, which overwrites a real file with no
+# error and no backup (§2.26).
+backup_companion_targets() {
+    [[ -n "${LINKED_DROPIN:-}" ]] || return 0
+    local target expanded bak n
+    while IFS= read -r target; do
+        [[ -n "$target" ]] || continue
+        expanded="${target/#\~/$HOME}"
+        [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+        bak="$expanded.pre-mise.bak"
+        n=1
+        while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+        warn "Backing up $target -> $bak (declared by the companion repo)"
+        mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+    done < <(python3 "$REPO/scripts/dotfiles-targets.py" "$CUSTOM_CONF" || true)
+}
 
 # ── 5. Validate config before handing over to mise ────────────────────────────
 run_lint() {
@@ -483,6 +491,8 @@ if [[ -d "$OLD_REPO" || -d "$OLD_CUSTOM_REPO" ]] && ! command -v python3 &>/dev/
       unstow the old repo and re-run with DOTFILES_OLD_REPO=/nonexistent."
 fi
 guard_old_repo
+# Safe only now: the guard above has proven no target resolves into an old repo.
+backup_companion_targets
 
 # Also runs twice, for the same reason as guard_old_repo: under
 # MISE_GLOBAL_CONFIG_FILE the profile files' entries are invisible, so a

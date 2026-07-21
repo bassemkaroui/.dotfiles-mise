@@ -55,10 +55,16 @@ jobs:
         run: |
           curl -fsSL https://mise.run | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # --two-pass on BOTH of these, not just the assertion step below.
+      # MISE_GLOBAL_CONFIG_FILE suppresses config.<profile>.toml (§2.12), so a
+      # single-pass run resolves CORE ONLY — which made four of the five matrix
+      # arms byte-identical to the core arm: `dotfiles apply --dry-run` hashed
+      # the same for "", "graphical,gnome,laptop" and "ai,dev,yazi,neovim,media".
+      # Anything broken inside a profile file was invisible to this whole job.
       - name: bootstrap status
-        run: sandbox/mkhome.sh --profiles "${{ matrix.profiles }}" -- bootstrap status
+        run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap status
       - name: dotfiles apply --dry-run
-        run: sandbox/mkhome.sh --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
+        run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
       - name: Profile-specific entries appear only with their profile
         # --two-pass is REQUIRED here: MISE_GLOBAL_CONFIG_FILE suppresses
         # config.<profile>.toml (§2.12), so a single-pass sandbox shows core
@@ -293,6 +299,34 @@ jobs:
             exit $fail
           '
 
+      - name: A fresh interactive bash must start clean (and at $? = 0)
+        # The zsh smoke test above had no bash counterpart, and that gap shipped
+        # a real regression: home/.bashrc ended with `[ -f ~/.bashrc.local ] && .
+        # ~/.bashrc.local`, so on any machine without that file EVERY new
+        # interactive shell started with $? = 1 — a prompt that renders exit
+        # status shows a permanent phantom error. The identical bug was found
+        # and fixed in .zshrc (8baf469) precisely because CI smoke-tested zsh.
+        #
+        # A pty is mandatory (§2.22) and the transcript goes to a real file, for
+        # the same two reasons documented on the zsh check.
+        run: |
+          set -euo pipefail
+          sudo -u tester -H env TERM=dumb \
+            script -qec "bash -i -c 'echo BASHSTATUS=\$?'" /tmp/bash-typescript.log \
+            >/dev/null 2>&1 || true
+          fail=0
+          if ! grep -q 'BASHSTATUS=0' /tmp/bash-typescript.log; then
+            echo "--- bash transcript ---"; cat /tmp/bash-typescript.log
+            echo "::error::a fresh interactive bash starts with a non-zero \$? (check ~/.bashrc's last line)"
+            fail=1
+          fi
+          if grep -qiE 'command not found|syntax error|no such file' /tmp/bash-typescript.log; then
+            echo "--- bash transcript ---"; cat /tmp/bash-typescript.log
+            echo "::error::interactive bash printed errors on startup"
+            fail=1
+          fi
+          exit $fail
+
       - name: Fresh-machine companion path (the one install.sh cannot cover)
         # install.sh links an ALREADY-CLONED companion at step 4b. On a genuinely
         # fresh machine the clone does not exist yet and setup:custom-hookup does
@@ -311,9 +345,15 @@ jobs:
             git add -A && git commit -qm fixture
             git clone -q --bare . /tmp/companion.git
           '
-          # Tear the deployment down to the pre-companion state.
+          # Tear the deployment down to the pre-companion state. The backups
+          # from install.sh's own run MUST go too: leaving them made the
+          # assertion below unconditionally true (it accepts .bak or .bak1, and
+          # .bak was already there from the earlier run), so a setup:custom-hookup
+          # that backed up nothing at all still passed. Verified by replaying the
+          # sequence against a task with its backup pass removed: fail=0.
           sudo -u tester -H bash -c '
             rm -rf ~/.dotfiles-custom-mise ~/.config/mise/conf.d/50-custom.toml ~/.gitconfig.identity
+            rm -f ~/.ssh/config.pre-mise.bak*
             printf "Host precious2\n  HostName 198.51.100.7\n" > ~/.ssh/config
             chmod 600 ~/.ssh/config
             sha256sum ~/.ssh/config | cut -d" " -f1 > /tmp/precious2.sha
@@ -326,8 +366,19 @@ jobs:
             fail=0
             [[ -L ~/.config/mise/conf.d/50-custom.toml ]] || { echo "::error::task did not link the drop-in"; fail=1; }
             [[ -L ~/.gitconfig.identity ]] || { echo "::error::task did not apply the companion"; fail=1; }
-            [[ -f ~/.ssh/config.pre-mise.bak1 || -f ~/.ssh/config.pre-mise.bak ]] \
-              || { echo "::error::task did not back up the real ~/.ssh/config before template mode"; fail=1; }
+            bak=""
+            for c in ~/.ssh/config.pre-mise.bak ~/.ssh/config.pre-mise.bak1; do
+              [[ -f "$c" ]] && bak="$c"
+            done
+            if [[ -z "$bak" ]]; then
+              echo "::error::task did not back up the real ~/.ssh/config before template mode"; fail=1
+            elif [[ "$(sha256sum "$bak" | cut -d" " -f1)" != "$(cat /tmp/precious2.sha)" ]]; then
+              # /tmp/precious2.sha used to be computed and never compared, so a
+              # backup of the WRONG content passed just as well as a right one.
+              echo "::error::$bak does not match the ~/.ssh/config that existed before the task"; fail=1
+            fi
+            grep -q "shared.example.invalid" ~/.ssh/config \
+              || { echo "::error::task did not render the companion ssh template"; fail=1; }
             exit $fail
           '
 
@@ -358,10 +409,60 @@ jobs:
           [[ "$n" == 1 ]] || { echo "::error::$n exec-zsh lines in ~norung/.bash_profile, expected 1"; fail=1; }
           exit $fail
 
-      - name: bootstrap status is converged
+      - name: Live config lint catches what it exists for
+        # `lint-config.py --live` guards the companion-repo contract, and it was
+        # never exercised by CI at all (the only callers are install.sh and
+        # setup:custom-hookup). Phase 5 specified the fixture as the place where
+        # the string-shorthand and second-`dotfiles.root` regressions get
+        # asserted; both checks worked but nothing ran them, so a regression in
+        # either was invisible. Positive AND negative cases, on a real machine
+        # with a real ~/.config/mise — which is the only place --live can run.
         run: |
+          set -euo pipefail
+          R=/home/tester/.dotfiles-mise
+          D=/home/tester/.config/mise/conf.d/99-lint-probe.toml
+          fail=0
+          run_lint() { sudo -u tester -H bash -lc "cd /; python3 $R/scripts/lint-config.py --live"; }
+          probe() {  # <label> <toml body>
+            printf '%s\n' "$2" > "$D"; chown tester:tester "$D"
+            if run_lint >/tmp/lint-probe.out 2>&1; then
+              cat /tmp/lint-probe.out
+              echo "::error::--live accepted a drop-in it must reject: $1"; fail=1
+            fi
+            rm -f "$D"
+          }
+          # Baseline: the real deployment plus the fixture companion must pass.
+          run_lint || { echo "::error::--live rejects the known-good deployment"; fail=1; }
+          probe "a second settings.dotfiles.root" \
+            '[settings]
+          dotfiles.root = "/tmp/elsewhere"'
+          probe "the string-shorthand source form with a missing source" \
+            '[dotfiles]
+          "~/.foorc" = "/tmp/definitely-not-here/foorc"'
+          probe "a [tools] key the core config already declares" \
+            '[tools]
+          ripgrep = "latest"'
+          probe "a ~/.config/mise/** target outside config.toml (D9a)" \
+            '[dotfiles]
+          "~/.config/mise/conf.d/evil.toml" = { source = "/etc/hostname", mode = "symlink" }'
+          # The drop-in must be gone whatever happened, or later steps inherit it.
+          rm -f "$D"
+          run_lint || { echo "::error::--live still failing after the probes were removed"; fail=1; }
+          exit $fail
+
+      - name: bootstrap status is converged
+        # `mise bootstrap status` ALONE asserts nothing: without --missing it
+        # exits 0 however much is missing, and it was not the last command in
+        # the block either, so its rc was discarded twice over. Verified against
+        # a sandbox with nothing installed: every line "missing", rc=0.
+        # --missing is real (`mise bootstrap status --help`): "Exit with code 1
+        # if any configured bootstrap state is not in its desired state".
+        run: |
+          set -euo pipefail
           sudo -u tester -H bash -lc '
+            set -euo pipefail
             export PATH="$HOME/.local/bin:$PATH"
-            mise bootstrap status
+            mise bootstrap status            # human-readable, for the log
+            mise bootstrap status --missing  # and this one actually fails
             mise dotfiles status --missing
           '

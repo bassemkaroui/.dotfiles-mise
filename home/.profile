@@ -20,4 +20,9 @@ if [ -d "$HOME/.local/bin" ]; then
     PATH="$HOME/.local/bin:$PATH"
 fi
 
-[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+# `if`, not `&&`: as the last statement of the file this would otherwise
+# leave $? = 1 on any machine without a rust toolchain. See the note in
+# ~/.bashrc.
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi

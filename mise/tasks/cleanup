@@ -27,11 +27,38 @@ ok() { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
 # A missing or half-checked-out repo makes EVERY deployed link dangle, which
 # would turn this task into "delete all my dotfiles". Refuse in that case: the
 # fix there is to restore the repo, not to reap the links.
-if [[ ! -d "$REPO/home" || ! -d "$REPO/mise" ]]; then
+#
+# The guard has to cover EVERY root whose links we are willing to delete, not
+# just $REPO. It used to validate $REPO while the ownership patterns also
+# accepted a hardcoded "$HOME/.dotfiles-mise/..." — so pointing
+# $DOTFILES_MISE_REPO at any complete checkout (a git worktree, a CI workspace;
+# .github/workflows/ci.yml sets that variable) while ~/.dotfiles-mise was
+# missing passed the guard and classified every deployed dotfile as stale.
+# Reproduced in a fake $HOME: ~/.zshrc was listed for removal.
+ROOTS=()
+for candidate in "$REPO" "$HOME/.dotfiles-mise"; do
+    [[ -d "$candidate/home" && -d "$candidate/mise" ]] || continue
+    # De-duplicate: the two are the same path in the normal case.
+    for existing in ${ROOTS[@]+"${ROOTS[@]}"}; do
+        [[ "$existing" == "$candidate" ]] && continue 2
+    done
+    ROOTS+=("$candidate")
+done
+
+if ((${#ROOTS[@]} == 0)); then
     warn "$REPO looks incomplete (missing home/ or mise/) — refusing to remove anything."
     warn "Restore the repo first; every link would look stale right now."
     exit 1
 fi
+
+# A link is ours only if it points into a root we just verified is complete.
+owned() { # <link target> [subdir under the root]
+    local target="$1" sub="${2:-}" r
+    for r in "${ROOTS[@]}"; do
+        [[ "$target" == "$r$sub"/* ]] && return 0
+    done
+    return 1
+}
 
 stale=()
 
@@ -40,10 +67,7 @@ shopt -s nullglob
 for link in "$CONF"/config*.toml "$CONF/tasks"; do
     [[ -L "$link" ]] || continue
     target="$(readlink "$link")"
-    case "$target" in
-        "$REPO"/* | "$HOME"/.dotfiles-mise/*) ;;
-        *) continue ;;
-    esac
+    owned "$target" || continue
     [[ -e "$link" ]] || stale+=("$link")
 done
 
@@ -52,21 +76,31 @@ done
 #     dangling drop-in is harmless to mise (it simply omits the file), but it
 #     is exactly the invisible leftover this task exists for — and while it
 #     sits there `setup:custom-hookup` reports "already linked" and does
-#     nothing. These point OUTSIDE this repo, so the ownership test is "is a
-#     symlink whose target is gone", not "points into $REPO".
+#     nothing. These point OUTSIDE this repo, so ownership cannot be "points
+#     into $REPO".
+#
+#     But it must still be *some* ownership test. Reaping every dangling
+#     conf.d link deleted drop-ins this repo never created — one pointing at an
+#     unmounted volume, or at a companion clone that is merely not cloned yet,
+#     is a link the user wants back, not a leftover. Only the drop-in we
+#     create, and links into the companion directory, are ours; anything else
+#     is reported and left alone.
+CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
 for link in "$CONF"/conf.d/*; do
     [[ -L "$link" && ! -e "$link" ]] || continue
-    stale+=("$link")
+    target="$(readlink "$link")"
+    if [[ "$(basename "$link")" == "50-custom.toml" || "$target" == "$CUSTOM_DIR"/* ]]; then
+        stale+=("$link")
+    else
+        warn "Dangling conf.d drop-in not created by this repo, leaving it: $link -> $target"
+    fi
 done
 
 # 2. Deployed dotfiles. Scan ~ shallowly plus the XDG trees, where nested
 #    targets live (a flat -maxdepth would miss ~/.config/a/b/c).
 while IFS= read -r -d '' link; do
     target="$(readlink "$link")"
-    case "$target" in
-        "$REPO"/home/* | "$HOME"/.dotfiles-mise/home/*) ;;
-        *) continue ;;
-    esac
+    owned "$target" "/home" || continue
     [[ -e "$link" ]] || stale+=("$link")
 done < <(
     find "$HOME" -maxdepth 1 -type l -print0 2>/dev/null

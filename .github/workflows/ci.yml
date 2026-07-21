@@ -1,0 +1,247 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ── 1. Lint ─────────────────────────────────────────────────────────────────
+  # Calls `mise run repo:lint` rather than re-deriving the file set. The old
+  # repo kept the find(1) invocation in two places (task + workflow) and had to
+  # keep them in sync by hand; here CI runs literally what a developer runs.
+  lint:
+    name: repo:lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install checkers
+        # zsh is NOT guaranteed on the runner image, and repo:lint fails rather
+        # than skipping when $CI is set — a silently-skipped `zsh -n` would mean
+        # a syntax error in .zshrc reaching every machine.
+        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh
+      - name: Install mise
+        run: |
+          curl -fsSL https://mise.run | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run the lint task
+        env:
+          DOTFILES_MISE_REPO: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mise trust "$GITHUB_WORKSPACE/mise/config.toml"
+          mise run repo:lint
+
+  # ── 2. Config sandbox ───────────────────────────────────────────────────────
+  # Every profile combination resolves, links what it should and nothing it
+  # shouldn't — in a throwaway $HOME, without installing a single tool.
+  sandbox:
+    name: sandbox (${{ matrix.profiles || 'core' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profiles:
+          - ""
+          - "ai,dev,yazi,neovim,media"
+          - "graphical,gnome,laptop"
+          - "graphical,cosmic,desktop"
+          - "veracrypt"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mise
+        run: |
+          curl -fsSL https://mise.run | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: bootstrap status
+        run: sandbox/mkhome.sh --profiles "${{ matrix.profiles }}" -- bootstrap status
+      - name: dotfiles apply --dry-run
+        run: sandbox/mkhome.sh --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
+      - name: Profile-specific entries appear only with their profile
+        # --two-pass is REQUIRED here: MISE_GLOBAL_CONFIG_FILE suppresses
+        # config.<profile>.toml (§2.12), so a single-pass sandbox shows core
+        # entries only and this assertion would pass for the wrong reason.
+        run: |
+          set -euo pipefail
+          out="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles status 2>/dev/null || true)"
+          want=0
+          case "${{ matrix.profiles }}" in *gnome*) want=2 ;; esac
+          # '~/.themes' anchored: plain '.themes' also matches the core
+          # ~/.config/bat/themes/... entry, which made an earlier version of
+          # this check green for both arms.
+          have="$(grep -c '~/\.themes' <<<"$out" || true)"
+          if [[ "$want" != "$have" ]]; then
+            echo "::error::~/.themes entries=$have, expected=$want for profiles '${{ matrix.profiles }}'"
+            echo "$out"
+            exit 1
+          fi
+
+  # ── 3. End-to-end ───────────────────────────────────────────────────────────
+  # The container proof: a real ubuntu:24.04, a NON-ROOT user with passwordless
+  # sudo (the production shape — root would hide every $USER/PAM/chsh edge
+  # case), install.sh run for real, twice, with a fixture companion repo so the
+  # cross-repo apply is exercised rather than skipped.
+  #
+  # CI cannot clone the author's private companion — GITHUB_TOKEN is scoped to
+  # this repo — so the fixture is built in the job. It is also where the
+  # §2.26 regression (template mode silently overwriting a real ~/.ssh/config)
+  # is asserted.
+  e2e:
+    name: end-to-end (ubuntu:24.04, non-root)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container:
+      image: ubuntu:24.04
+      options: --user root
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      DOTFILES_NONINTERACTIVE: "1"
+    steps:
+      - name: Base prereqs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git sudo curl ca-certificates python3 locales tzdata
+          locale-gen en_US.UTF-8
+
+      - name: Create the tester user
+        run: |
+          useradd -m -s /bin/bash tester
+          echo 'tester ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/tester
+          chmod 0440 /etc/sudoers.d/tester
+
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Place the repo at ~tester/.dotfiles-mise
+        run: |
+          set -euo pipefail
+          cp -a "$GITHUB_WORKSPACE/repo" /home/tester/.dotfiles-mise
+          chown -R tester:tester /home/tester/.dotfiles-mise
+
+      - name: Build the fixture companion repo
+        # Mirrors the real companion's shape (CUSTOM.md): one config file with
+        # explicit absolute sources, a home/ tree, and a template-mode entry.
+        run: |
+          set -euo pipefail
+          C=/home/tester/.dotfiles-custom-mise
+          mkdir -p "$C/mise" "$C/home" "$C/templates"
+          cat > "$C/home/.gitconfig.identity" <<'EOF'
+          [user]
+          	name = CI Tester
+          	email = tester@example.invalid
+          EOF
+          cat > "$C/templates/ssh_config.tmpl" <<'EOF'
+          Host shared-host
+            HostName shared.example.invalid
+          {% if "laptop" in mise_env %}
+          Host device-host
+            HostName laptop.example.invalid
+          {% else %}
+          Host device-host
+            HostName default.example.invalid
+          {% endif %}
+          EOF
+          chmod 600 "$C/templates/ssh_config.tmpl"
+          cat > "$C/mise/config.custom.toml" <<'EOF'
+          [dotfiles]
+          "~/.gitconfig.identity" = { source = "~/.dotfiles-custom-mise/home/.gitconfig.identity", mode = "symlink" }
+          "~/.ssh/config" = { source = "~/.dotfiles-custom-mise/templates/ssh_config.tmpl", mode = "template" }
+          EOF
+          # A pre-existing REAL ~/.ssh/config: template mode overwrites one
+          # silently (§2.26), so install.sh must back it up first.
+          mkdir -p /home/tester/.ssh
+          printf 'Host precious\n  HostName 203.0.113.9\n' > /home/tester/.ssh/config
+          chmod 700 /home/tester/.ssh
+          chmod 600 /home/tester/.ssh/config
+          sha256sum /home/tester/.ssh/config | cut -d' ' -f1 > /tmp/precious.sha
+          chown -R tester:tester "$C" /home/tester/.ssh
+
+      - name: Install mise (as tester)
+        run: sudo -u tester -H bash -lc 'curl -fsSL https://mise.run | sh'
+
+      - name: install.sh — first run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo -u tester -H -E env DOTFILES_NONINTERACTIVE=1 DOTFILES_PROFILES=laptop \
+            bash -lc 'export PATH="$HOME/.local/bin:$PATH"; ~/.dotfiles-mise/install.sh' </dev/null
+          sudo -u tester -H bash -c '
+            find "$HOME" -maxdepth 4 -type l -printf "%p -> %l\n" 2>/dev/null | sort > /tmp/run1.links
+            find "$HOME" -maxdepth 6 -name "*.pre-mise.bak*" 2>/dev/null | sort > /tmp/run1.baks
+          '
+
+      - name: install.sh — second run (idempotency)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo -u tester -H -E env DOTFILES_NONINTERACTIVE=1 \
+            bash -lc 'export PATH="$HOME/.local/bin:$PATH"; ~/.dotfiles-mise/install.sh' </dev/null
+          sudo -u tester -H bash -c '
+            find "$HOME" -maxdepth 4 -type l -printf "%p -> %l\n" 2>/dev/null | sort > /tmp/run2.links
+            find "$HOME" -maxdepth 6 -name "*.pre-mise.bak*" 2>/dev/null | sort > /tmp/run2.baks
+          '
+          fail=0
+          diff -u /tmp/run1.links /tmp/run2.links || { echo "::error::symlink graph changed between runs"; fail=1; }
+          diff -u /tmp/run1.baks  /tmp/run2.baks  || { echo "::error::second run created new .pre-mise.bak files"; fail=1; }
+          exit $fail
+
+      - name: Assert post-bootstrap state
+        run: |
+          set -euo pipefail
+          sudo -u tester -H bash -lc '
+            export PATH="$HOME/.local/bin:$PATH"
+            fail=0
+            err() { echo "::error::$1"; fail=1; }
+
+            # --- core deployment ---
+            for f in .zshrc .zshenv .bashrc .profile .p10k.zsh .gitconfig .config/mise/config.toml; do
+              [[ -L "$HOME/$f" ]] || err "missing or not a symlink: ~/$f"
+            done
+            [[ -d "$HOME/.oh-my-zsh" ]]  || err "oh-my-zsh not cloned"
+            [[ -L "$HOME/.config/tmux/tmux.conf" ]] || err "setup:repo-links did not link tmux.conf"
+            command -v zsh >/dev/null || err "zsh (apt) not installed"
+            command -v gpg >/dev/null || err "gnupg (apt) not installed"
+            mise ls --installed | grep -qE "^(rust|go|node)\b" || err "expected mise runtimes missing"
+            [[ $(find "$HOME" -maxdepth 5 -xtype l 2>/dev/null | wc -l) -eq 0 ]] || {
+              find "$HOME" -maxdepth 5 -xtype l; err "broken symlinks under \$HOME"; }
+
+            # --- companion repo (cross-repo apply) ---
+            [[ -L "$HOME/.config/mise/conf.d/50-custom.toml" ]] || err "companion drop-in not linked"
+            [[ -L "$HOME/.gitconfig.identity" ]] || err "companion .gitconfig.identity not deployed"
+            [[ "$(git config --get user.email)" == "tester@example.invalid" ]] \
+              || err "git identity not resolved through the [include] chain"
+
+            # --- §2.26: the template-mode entry must not eat a real file ---
+            [[ -f "$HOME/.ssh/config.pre-mise.bak" ]] || err "pre-existing ~/.ssh/config was NOT backed up"
+            [[ "$(sha256sum "$HOME/.ssh/config.pre-mise.bak" | cut -d" " -f1)" == "$(cat /tmp/precious.sha)" ]] \
+              || err "~/.ssh/config backup does not match the original"
+            grep -q "laptop.example.invalid" "$HOME/.ssh/config" || err "ssh template did not render the laptop branch"
+            [[ "$(stat -c %a "$HOME/.ssh/config")" == "600" ]] || err "rendered ~/.ssh/config is not mode 600"
+
+            # --- login shell: the two defects CI exists to catch (session A, M5) ---
+            out="$(bash --login -c "echo LOGIN_OK" </dev/null)"
+            [[ "$out" == *LOGIN_OK* ]] || err "bash --login -c no longer runs its command (exec zsh regression)"
+
+            # --- an interactive zsh must start clean on a fresh machine ---
+            zsh -ic "exit" </dev/null || err "interactive zsh failed to start"
+
+            # --- M2: nothing may write into the repo working tree ---
+            dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain)"
+            [[ -z "$dirty" ]] || { echo "$dirty"; err "install.sh wrote into the repo working tree"; }
+
+            exit $fail
+          '
+
+      - name: bootstrap status is converged
+        run: |
+          sudo -u tester -H bash -lc '
+            export PATH="$HOME/.local/bin:$PATH"
+            mise bootstrap status
+            mise dotfiles status --missing
+          '

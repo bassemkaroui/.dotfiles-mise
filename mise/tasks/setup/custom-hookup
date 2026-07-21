@@ -248,17 +248,6 @@ else
     backup_differing
 fi
 
-# Apply now rather than leaving it for the next bootstrap: the very next chain
-# step (setup:git-signing) reads ~/.gitconfig.local.example, which this repo
-# deploys. Verified that a chained task can apply within the same bootstrap and
-# the next step sees the result.
-if mise dotfiles apply --yes >/dev/null 2>&1 || mise dotfiles apply >/dev/null 2>&1; then
-    ok "Applied the companion repo's dotfiles"
-else
-    warn "\`mise dotfiles apply\` failed after linking the companion repo"
-    warn "(run it by hand to see why: mise dotfiles status)"
-fi
-
 # Template mode gives the rendered file the SOURCE's permissions — and git does
 # not carry them: it records only the executable bit, so a template committed as
 # 0600 comes out of a fresh clone at 0664, and the rendered ~/.ssh/config with
@@ -267,7 +256,10 @@ fi
 # Fix the SOURCE, not the rendered file. Chmod'ing mise's output instead makes
 # `mise dotfiles status` report `differs (permissions differ)` forever — the
 # target no longer matches the source — so `status --missing` exits 1 and every
-# apply rewrites the mode back. CI caught exactly that loop.
+# apply rewrites the mode back. CI caught exactly that loop — and then caught
+# it a second time when the chmod ran AFTER the apply: the target kept the
+# clone's 0664 while the source became 0600, which is the same mismatch with
+# the operands swapped. It has to happen BEFORE mise renders anything.
 chmod 700 "$HOME/.ssh" 2>/dev/null || true
 if have python3 && [[ -f "$REPO/scripts/dotfiles-targets.py" ]]; then
     while IFS=$'\t' read -r target source; do
@@ -279,4 +271,15 @@ if have python3 && [[ -f "$REPO/scripts/dotfiles-targets.py" ]]; then
         chmod 600 "$expanded_source"
         ok_changed "Tightened $(basename "$expanded_source") to 0600 (git cannot carry file modes)"
     done < <(python3 "$REPO/scripts/dotfiles-targets.py" --with-source "$SOURCE_CONF" || true)
+fi
+
+# Apply now rather than leaving it for the next bootstrap: the very next chain
+# step (setup:git-signing) reads ~/.gitconfig.local.example, which this repo
+# deploys. Verified that a chained task can apply within the same bootstrap and
+# the next step sees the result.
+if mise dotfiles apply --yes >/dev/null 2>&1 || mise dotfiles apply >/dev/null 2>&1; then
+    ok "Applied the companion repo's dotfiles"
+else
+    warn "\`mise dotfiles apply\` failed after linking the companion repo"
+    warn "(run it by hand to see why: mise dotfiles status)"
 fi

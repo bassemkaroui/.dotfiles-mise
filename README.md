@@ -109,13 +109,20 @@ directory with the same shape as this one, and nothing about it is specific to t
 setup:
 
 ```
-~/.dotfiles-custom-mise/       (or $DOTFILES_CUSTOM_MISE_DIR)
+~/.dotfiles-custom-mise/       (the path is baked into its own sources — see CUSTOM.md)
 ├── mise/config.custom.toml    [dotfiles] entries with explicit absolute sources
-└── home/                      the files those entries point at
+├── home/                      the files those entries point at
+└── templates/                 *.tmpl for per-machine variants
 ```
 
-`setup:custom-hookup`, a step in the `[tasks.bootstrap]` chain, **clones it if it's missing**
-and links that config file to `~/.config/mise/conf.d/50-custom.toml`. The clone URL comes from
+**Full contract: [CUSTOM.md](CUSTOM.md).**
+
+`install.sh` links that config file to `~/.config/mise/conf.d/50-custom.toml` when the clone is
+already there — early, so the companion's entries are covered by the collision lint, the
+old-repo guard and the conflict backup. `setup:custom-hookup`, a step in the
+`[tasks.bootstrap]` chain, is the other entry point: it **clones the companion if it's missing**
+and repeats those checks itself, because on a fresh machine it runs long after `install.sh`
+finished. The clone URL comes from
 `$DOTFILES_CUSTOM_MISE_URL`, or is derived from this repo's own `origin` by naming convention
 (`…/.dotfiles-mise.git` → `…/.dotfiles-custom-mise.git`) — so nothing private is committed here
 and you get *your* companion, not the author's. No companion repo, no credentials, no problem:
@@ -136,6 +143,12 @@ Rules the companion repo must follow — the first is the one that bites:
   silently resolved. `install.sh` runs that pass on every install.
 - **Its sources must exist whenever its config file does**, because a `[dotfiles]` entry
   with a missing explicit source aborts the *entire* apply — this repo's files included.
+  (The reverse is harmless: delete the clone and mise simply omits the dangling drop-in.)
+  `setup:custom-hookup` removes the link again if the live lint fails, so a broken companion
+  cannot take the main repo down with it.
+- **It must live at `~/.dotfiles-custom-mise`**: `[dotfiles].source` is not templated, so those
+  absolute paths cannot follow the clone somewhere else. `$DOTFILES_CUSTOM_MISE_DIR` changes
+  where the task *looks*, not what the sources say.
 
 This repo already leaves room for the usual private pieces: `~/.gitconfig` ends with
 `[include]`s for `~/.gitconfig.identity` and `~/.gitconfig.local`, and

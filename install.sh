@@ -235,6 +235,32 @@ else
     ok "Wrote ~/.config/mise/miserc.toml (profiles: ${selected[*]:-none})"
 fi
 
+# ── 4b. Companion repo drop-in (before the lint/guard/backup block) ───────────
+# The private companion repo (CUSTOM.md) owns one config file, which belongs at
+# ~/.config/mise/conf.d/50-custom.toml. setup:custom-hookup also creates that
+# link — but it runs inside [tasks.bootstrap], i.e. bootstrap step 12, which is
+# AFTER everything below: the collision lint, the old-repo guard and the
+# conflict backup would all be blind to the companion's entries on the run that
+# first deploys them. Since ~/.ssh/config is a template-mode entry, and template
+# mode overwrites a pre-existing real file silently (§2.26), that blindness
+# costs a real file. Link it here when the clone already exists, so the normal
+# step-4 apply deploys it under the protection of all three checks;
+# setup:custom-hookup stays the fallback for a companion cloned later.
+CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
+CUSTOM_CONF="$CUSTOM_DIR/mise/config.custom.toml"
+if [[ -f "$CUSTOM_CONF" ]]; then
+    mkdir -p "$CONF/conf.d"
+    DROPIN="$CONF/conf.d/50-custom.toml"
+    if [[ -e "$DROPIN" && ! -L "$DROPIN" ]]; then
+        warn "$DROPIN is a real file, not a link — leaving it alone"
+    elif [[ "$(readlink "$DROPIN" 2>/dev/null || true)" == "$CUSTOM_CONF" ]]; then
+        ok "Companion repo already linked into conf.d"
+    else
+        ln -sfn "$CUSTOM_CONF" "$DROPIN"
+        ok "Linked the companion repo: $DROPIN -> $CUSTOM_CONF"
+    fi
+fi
+
 # ── 5. Validate config before handing over to mise ────────────────────────────
 run_lint() {
     # rc 0 = clean, 1 = real problem (fatal), 2 = the linter could not run at

@@ -30,23 +30,79 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
 CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
 
+# ─── Clone it, so a fresh machine needs no manual git clone ───────────────────
+#
+# Why this is NOT a [bootstrap.repos] entry, which would be the obvious home for
+# it (all three verified 2026-07-21):
+#
+#   1. A repos clone that fails ABORTS the whole bootstrap — the imperative tail
+#      never runs and install.sh dies with it. The companion is private, so the
+#      clone fails on every machine without credentials: CI, a fresh box before
+#      its keys exist, and anyone else using this repo. A task can decline.
+#   2. `url = "{{ env.SOMETHING }}"` is NOT templated in [bootstrap.repos] — the
+#      literal string is used — so the URL cannot be supplied per machine there.
+#   3. The companion's own remote is `git@github:...`, an ssh alias defined in
+#      ~/.ssh/config — which the companion itself deploys. Cloning it by that
+#      URL on a fresh machine is circular; deriving from this repo's remote
+#      gives a canonical `git@github.com:` URL that resolves without the alias.
+#
+# URL resolution: $DOTFILES_CUSTOM_MISE_URL wins; otherwise it is derived from
+# this repo's own origin by naming convention, so nothing private is committed
+# here and any user of this repo gets their own companion, not the author's.
+custom_url() {
+    if [[ -n "${DOTFILES_CUSTOM_MISE_URL:-}" ]]; then
+        printf '%s' "$DOTFILES_CUSTOM_MISE_URL"
+        return 0
+    fi
+    local origin
+    origin="$(git -C "$REPO" remote get-url origin 2>/dev/null || true)"
+    [[ -n "$origin" ]] || return 1
+    # <anything>.dotfiles-mise[.git] → <anything>.dotfiles-custom-mise.git
+    case "$origin" in
+        *.dotfiles-mise.git) printf '%s' "${origin%.dotfiles-mise.git}.dotfiles-custom-mise.git" ;;
+        *.dotfiles-mise) printf '%s' "${origin%.dotfiles-mise}.dotfiles-custom-mise.git" ;;
+        *) return 1 ;;
+    esac
+}
+
 if [[ ! -d "$CUSTOM_DIR" ]]; then
-    info "No custom repo at $CUSTOM_DIR — skipping"
-    info "(clone it there, or set \$DOTFILES_CUSTOM_MISE_DIR, then re-run this task)"
-    exit 0
+    if ! url="$(custom_url)"; then
+        info "No companion repo at $CUSTOM_DIR, and no URL to try"
+        info "(clone it there, or set \$DOTFILES_CUSTOM_MISE_URL, then: mise run setup:custom-hookup)"
+        exit 0
+    fi
+    info "Cloning the companion repo: $url"
+    # GIT_TERMINAL_PROMPT=0: without credentials git would otherwise sit waiting
+    # for a username that an unattended bootstrap will never type.
+    if GIT_TERMINAL_PROMPT=0 git clone --quiet "$url" "$CUSTOM_DIR" 2>/dev/null; then
+        ok_changed "Cloned $url → $CUSTOM_DIR"
+    else
+        # Entirely normal: no companion repo exists, or this machine has no
+        # credentials for it yet. Never fatal.
+        rmdir "$CUSTOM_DIR" 2>/dev/null || true
+        info "Could not clone $url — continuing without a companion repo"
+        info "(set up your git credentials, then: mise run setup:custom-hookup)"
+        exit 0
+    fi
 fi
 
+# ─── Hook it up ───────────────────────────────────────────────────────────────
+# PHASE 6 REWRITES EVERYTHING BELOW. The companion repo is data, not a program
+# (§7.7): this task will symlink its mise/config.custom.toml to
+# ~/.config/mise/conf.d/50-custom.toml and apply it, rather than executing an
+# install.sh the companion has to carry. Until that lands, the old contract is
+# honoured for machines that already follow it.
+
 if [[ ! -x "$CUSTOM_DIR/install.sh" ]]; then
-    warn "$CUSTOM_DIR exists but has no executable install.sh — nothing to run"
-    warn "(the custom-repo contract is defined in MIGRATION.md; it lands in Phase 6)"
+    warn "$CUSTOM_DIR has no executable install.sh — nothing to run yet"
+    warn "(the data-only contract lands in Phase 6; see MIGRATION.md)"
     exit 0
 fi
 
 info "Running $CUSTOM_DIR/install.sh"
-# Third-party code in the middle of a five-step chain: a non-zero exit would
-# take setup:completions, setup:git-signing and setup:login-shell-fallback down
-# with it and fail the whole bootstrap. Every other step in the chain degrades
-# to a warning; this one must too.
+# Third-party code in the middle of the chain: a non-zero exit would take every
+# later step down with it and fail the whole bootstrap (§2.21). Every other step
+# degrades to a warning; this one must too.
 if "$CUSTOM_DIR/install.sh"; then
     ok "Custom repo hookup complete"
 else

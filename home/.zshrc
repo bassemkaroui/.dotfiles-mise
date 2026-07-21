@@ -254,4 +254,13 @@ fi
 # ── Machine-local overlay ─────────────────────────────────────────────────────
 # Anything specific to this machine (extra PATH entries, vagrant/java/go-by-hand
 # stanzas, work tooling) belongs in ~/.zshrc.local, which is never committed.
-[[ -f ~/.zshrc.local ]] && source ~/.zshrc.local
+#
+# `if`, not `[[ … ]] && source`: this is the LAST line of the file, so its
+# status is the status of shell startup. With the && form and no
+# ~/.zshrc.local — i.e. on every fresh machine — the test is false, .zshrc
+# returns 1, and every new shell starts with $? = 1. Prompts that show the last
+# exit status then open on a phantom error, and `zsh -ic <cmd>` reports failure
+# for a perfectly healthy shell. CI caught this on a fresh container.
+if [[ -f ~/.zshrc.local ]]; then
+    source ~/.zshrc.local
+fi

@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+#MISE description="Run every pre-commit check: config lint, shellcheck, shfmt, shell syntax"
+#MISE raw=true
+#USAGE flag "--fix" help="Rewrite files with shfmt instead of only reporting diffs"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="lint"
+# shellcheck source=lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/profile.sh"
+
+# CI calls THIS TASK rather than re-implementing the checks (the old repo kept
+# two copies of the find(1) invocation in sync by hand, and the plan's §0.1
+# "always green before committing" list was a third). One definition, so a file
+# that CI scans is by construction a file `mise run lint` scans.
+#
+# Scope, deliberately: the repo's own machinery — tasks, install.sh, the
+# sandbox harness, the doc fetcher, the python scripts. NOT home/: those files
+# are deployed verbatim into $HOME, several are vendored upstream
+# (.git-completion.bash, .git-prompt.sh, .p10k.zsh) and the ported ones do not
+# satisfy shfmt/shellcheck today. Reformatting a file that lands in $HOME is a
+# behaviour risk with no reviewer; they get a syntax check instead, which is
+# what actually protects a login shell.
+
+FIX="${usage_fix:-false}"
+
+[[ -d "$REPO/mise/tasks" ]] || fail "Repo not found at $REPO (set \$DOTFILES_MISE_REPO)"
+cd "$REPO"
+
+# ─── File discovery ───────────────────────────────────────────────────────────
+# Tasks are extensionless files; lib/ holds *.sh helpers and *.py helpers.
+# __pycache__ is gitignored but present on any machine that ran the cosmic
+# theme helper, and a .pyc is not a shell script.
+mapfile -t SHELL_FILES < <(
+    find mise/tasks -type f \
+        ! -name '*.py' \
+        ! -name '*.pyc' \
+        ! -path '*/__pycache__/*' \
+        | sort
+    printf '%s\n' install.sh sandbox/mkhome.sh docs/fetch.sh
+)
+mapfile -t PY_FILES < <(
+    find scripts mise/tasks -type f -name '*.py' ! -path '*/__pycache__/*' | sort
+)
+
+((${#SHELL_FILES[@]} > 0)) || fail "No shell files discovered — wrong cwd?"
+
+status=0
+step_failed() {
+    warn "$1"
+    status=1
+}
+
+# ─── 1. Config collision lint (D9/D9a) ────────────────────────────────────────
+# Repo mode only. `--live` is deliberately NOT run here: it inspects
+# ~/.config/mise on the machine you happen to be sitting at, which cannot be
+# green until this repo is cut over. install.sh runs it at the moment it
+# matters; CI runs it inside a sandbox.
+if have python3; then
+    if python3 scripts/lint-config.py; then
+        ok "lint-config (repo) passed"
+    else
+        step_failed "lint-config (repo) failed"
+    fi
+    for f in "${PY_FILES[@]}"; do
+        # py_compile would litter __pycache__ next to the sources.
+        python3 -c 'import sys; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")' "$f" \
+            || step_failed "python syntax error in $f"
+    done
+    ok "python syntax OK (${#PY_FILES[@]} files)"
+else
+    warn "python3 not found — skipping the config lint and python syntax checks"
+fi
+
+# ─── 2. shellcheck ────────────────────────────────────────────────────────────
+if have shellcheck; then
+    if shellcheck --severity=warning "${SHELL_FILES[@]}"; then
+        ok "shellcheck passed (${#SHELL_FILES[@]} files)"
+    else
+        step_failed "shellcheck reported issues (see above)"
+    fi
+else
+    fail "shellcheck not found — install it (sudo apt-get install -y shellcheck) and retry"
+fi
+
+# ─── 3. shfmt ─────────────────────────────────────────────────────────────────
+# Pinned so local and CI agree byte-for-byte; cached so a second run is offline.
+SHFMT_VERSION="v3.10.0"
+SHFMT_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/dotfiles-lint"
+SHFMT_BIN="$SHFMT_CACHE/shfmt-${SHFMT_VERSION}"
+
+if have shfmt; then
+    SHFMT="$(command -v shfmt)"
+elif [[ -x "$SHFMT_BIN" ]]; then
+    SHFMT="$SHFMT_BIN"
+else
+    info "shfmt $SHFMT_VERSION not on PATH — downloading to $SHFMT_BIN"
+    mkdir -p "$SHFMT_CACHE"
+    case "$(uname -m)" in
+        x86_64) asset="linux_amd64" ;;
+        aarch64 | arm64) asset="linux_arm64" ;;
+        *) fail "No pinned shfmt build for $(uname -m) — install shfmt manually" ;;
+    esac
+    curl -fsSL -o "$SHFMT_BIN" \
+        "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_${asset}" \
+        || fail "Could not download shfmt — install it manually and retry"
+    chmod +x "$SHFMT_BIN"
+    SHFMT="$SHFMT_BIN"
+fi
+
+if [[ "$FIX" == "true" ]]; then
+    "$SHFMT" -w -i 4 -ci -bn "${SHELL_FILES[@]}"
+    ok_changed "shfmt --fix applied"
+elif "$SHFMT" -d -i 4 -ci -bn "${SHELL_FILES[@]}"; then
+    ok "shfmt passed"
+else
+    step_failed "shfmt reported diffs (apply with: mise run lint --fix)"
+fi
+
+# ─── 4. Syntax check of the deployed rc files ─────────────────────────────────
+# A syntax error in one of these bricks every new login shell on every machine
+# that pulls, and nothing else in this repo would catch it.
+syntax_check() {
+    local checker="$1" f
+    shift
+    have "$checker" || {
+        warn "$checker not found — skipping its syntax checks"
+        return 0
+    }
+    for f in "$@"; do
+        [[ -f "$f" ]] || continue
+        "$checker" -n "$f" || step_failed "$checker -n failed: $f"
+    done
+    ok "$checker -n passed ($# files)"
+}
+syntax_check bash \
+    home/.bashrc home/.profile home/.bash_logout \
+    home/.git-completion.bash home/.git-prompt.sh \
+    home/.git-template/hooks/pre-commit home/.claude/statusline-command.sh
+syntax_check zsh \
+    home/.zshrc home/.zshenv home/.zprofile home/.p10k.zsh home/.fzf.zsh
+
+# ─── Verdict ──────────────────────────────────────────────────────────────────
+if ((status)); then
+    fail "Lint failed — do not push."
+fi
+ok "All lints passed — safe to push"

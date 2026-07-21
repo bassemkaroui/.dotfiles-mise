@@ -11,6 +11,39 @@ TASK_NAME="setup:p10k-icon"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
+# ─── The escapes below need a UTF-8 locale ────────────────────────────────────
+# bash expands $'\uXXXX' AT PARSE TIME against the CURRENT locale, and when the
+# codepoint cannot be represented it leaves the escape as LITERAL TEXT. In
+# C/POSIX — no LANG, which is normal for a container, a cron job, a minimal
+# server image or `env -i` — every icon below therefore becomes the 6-character
+# string \uF32A, and this task cheerfully writes
+#   typeset -g POWERLEVEL9K_OS_ICON_CONTENT_EXPANSION='uF32A'
+# into ~/.p10k.local.zsh (awk -v eats the backslash on the way). The prompt
+# then shows that text forever. Reproduced with `env -i`.
+#
+# The probe compares against the escape SPELLED OUT in single quotes; there is
+# deliberately no literal Private Use Area glyph anywhere in this file, because
+# any encoding-unaware tool in the editing chain silently eats those.
+_probe=$'\uF32A'
+if [[ "$_probe" == '\uF32A' ]]; then
+    if [[ -z "${P10K_ICON_UTF8_REEXEC:-}" ]]; then
+        # Re-exec once in a UTF-8 locale. The sentinel prevents a loop if the
+        # chosen locale is not actually available.
+        for _loc in C.UTF-8 en_US.UTF-8; do
+            if LC_ALL="$_loc" locale charmap 2>/dev/null | grep -qi 'utf-*8'; then
+                export P10K_ICON_UTF8_REEXEC=1
+                exec env LC_ALL="$_loc" bash "${BASH_SOURCE[0]}" "$@"
+            fi
+        done
+    fi
+    # Verified, not trusted: if it is still degraded, write nothing rather than
+    # putting the escape text in the user's prompt.
+    warn "This locale (${LC_ALL:-${LANG:-C}}) cannot represent the Nerd Font glyphs;"
+    warn "writing an icon now would put the text 'uF32A' in your prompt."
+    skip "Install a UTF-8 locale (e.g. locale-gen C.UTF-8) and re-run: mise run setup:p10k-icon"
+fi
+unset _probe
+
 # Port of the old repo's setup:p10k-icon, and the reason the companion repo no
 # longer needs a p10k package at all: its tag-desktop/.p10k.zsh differed from
 # the shared one by exactly ONE line — this icon. A 1700-line copy declared in
@@ -54,6 +87,10 @@ current_icon() {
 # Replace the line if present, append it otherwise — never duplicate it.
 write_icon() {
     local icon="$1" tmp
+    # Unconditionally, in BOTH branches: the replace branch below skipped it,
+    # so setting an icon on a machine whose file already had the typeset line
+    # left no record that the question had been answered.
+    ensure_file
     if [[ -f "$LOCAL" ]] && grep -q "^[[:space:]]*typeset -g ${KEY}=" "$LOCAL"; then
         tmp="$(mktemp)"
         awk -v repl="typeset -g ${KEY}='${icon}'" -v key="${KEY}" '
@@ -61,19 +98,33 @@ write_icon() {
             { print }
         ' "$LOCAL" >"$tmp" && mv -f "$tmp" "$LOCAL"
     else
-        ensure_file
         printf "typeset -g %s='%s'\n" "$KEY" "$icon" >>"$LOCAL"
     fi
 }
 
+# Create the file if missing, and make sure it carries $MARKER either way.
+#
+# It used to return early on an existing file, so the marker was only ever
+# written on a machine that had none — while write_icon's replace branch never
+# called this at all. Any machine migrating from the OLD repo has a
+# ~/.p10k.local.zsh already (the old task wrote the same header without a
+# marker), so those machines never recorded an answer and this task re-printed
+# its menu on EVERY bootstrap from a terminal, including right after the user
+# picked "Keep the default (and stop asking)". That is the exact annoyance the
+# header comment above claims to have fixed.
 ensure_file() {
-    [[ -f "$LOCAL" ]] && return 0
-    cat >"$LOCAL" <<EOF
+    if [[ ! -f "$LOCAL" ]]; then
+        cat >"$LOCAL" <<EOF
 # Per-machine powerlevel10k overrides. Sourced by ~/.zshrc AFTER ~/.p10k.zsh,
 # so anything set here wins and survives \`p10k configure\`. Machine-local on
 # purpose: not in any repo, not deployed by mise.
 $MARKER
 EOF
+        return 0
+    fi
+    # Never rewrite the file to add the marker: append, so a symlinked or
+    # user-edited file keeps its identity and contents.
+    grep -qF "$MARKER" "$LOCAL" || printf '%s\n' "$MARKER" >>"$LOCAL"
 }
 
 # ─── --show / --clear ─────────────────────────────────────────────────────────

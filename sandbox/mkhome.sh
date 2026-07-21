@@ -24,7 +24,10 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROFILES="${PROFILES:-}"
+# NOT "${PROFILES:-}": inheriting a caller's $PROFILES silently activated
+# profiles nobody asked this run for, and the banner then reported them as if
+# they had been requested. Only --profiles selects.
+PROFILES=""
 KEEP=0
 TWO_PASS=0
 
@@ -58,7 +61,23 @@ done
 unset MISE_TRUSTED_CONFIG_PATHS MISE_GLOBAL_CONFIG_FILE MISE_CONFIG_DIR MISE_ENV \
     MISE_DATA_DIR MISE_STATE_DIR MISE_CACHE_DIR
 
-SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-mise-sandbox.XXXXXX")"
+# Not only MISE_*. These three redirect tools at the REAL user state regardless
+# of $HOME, which is the one thing this harness exists to prevent: a sandboxed
+# gpg:* task passes no --homedir and relies entirely on $HOME redirection, so an
+# exported GNUPGHOME would point it at the real keyring.
+unset GNUPGHOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+
+# mise resolves `<ancestor>/.config/mise/config.toml` from the CWD, independent
+# of $HOME (verified: cd / → clean; cd ~/anything with $HOME set elsewhere →
+# the REAL ~/.config/mise/config.toml is loaded as a project config). The
+# sandbox cds into its own $HOME below, so this only matters if that $HOME sits
+# under the real one — which is exactly what TMPDIR=$HOME/tmp would do, and
+# every assertion in this harness would then be silently contaminated by the
+# real machine's config.
+TMPDIR=/tmp
+export TMPDIR
+
+SANDBOX="$(mktemp -d "$TMPDIR/dotfiles-mise-sandbox.XXXXXX")"
 [[ $KEEP -eq 1 ]] || trap 'rm -rf "$SANDBOX"' EXIT
 
 export HOME="$SANDBOX/home"

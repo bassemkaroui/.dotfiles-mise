@@ -21,14 +21,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #
 # All this task does is symlink that one config file into
 # ~/.config/mise/conf.d/50-custom.toml — where mise loads it alongside the main
-# config, with no trust prompt (verified) — and apply it. The contract the
-# companion must honour is in CUSTOM.md.
+# config once trusted — and apply it. The contract the companion must honour is
+# in CUSTOM.md.
 #
 # install.sh creates the same link earlier, before its guard/backup/lint block,
 # for machines where the clone already exists. This task is the other entry
 # path: the fresh machine, where the companion is cloned right here, at
 # bootstrap step 12 — long after install.sh finished. That is why every safety
-# check install.sh performs has to exist here too (see backup_differing below).
+# check install.sh performs is repeated below: trust, live lint, backup.
 
 CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
 DROPIN="$CONF/conf.d/50-custom.toml"
@@ -115,12 +115,24 @@ if [[ -e "$DROPIN" && ! -L "$DROPIN" ]]; then
 fi
 
 current_target="$(readlink "$DROPIN" 2>/dev/null || true)"
+FIRST_LINK=false
 if [[ "$current_target" == "$SOURCE_CONF" ]]; then
     ok "Companion drop-in already linked: $DROPIN"
 else
     ln -sfn "$SOURCE_CONF" "$DROPIN"
+    FIRST_LINK=true
     ok_changed "Linked $DROPIN → $SOURCE_CONF"
 fi
+
+# An UNTRUSTED conf.d drop-in is SILENTLY IGNORED — verified 2026-07-21: with
+# it in place, `mise dotfiles status` exits 0, mentions no trust problem, and
+# the entries simply do not exist. (That is gentler than §2.10's behaviour for
+# the global config, and far more dangerous here: the companion would appear to
+# be wired up and deploy nothing, so setup:git-signing — the very next chain
+# step — would find no ~/.gitconfig.local.example and no-op forever.)
+# install.sh trusts every conf.d file in its own step 6; this task runs at
+# bootstrap step 12, long after that loop, so it must do its own.
+mise trust "$DROPIN" >/dev/null 2>&1 || warn "Could not \`mise trust\` $DROPIN"
 
 # ─── Validate BEFORE applying ─────────────────────────────────────────────────
 # The drop-in is now loadable by every mise command on this machine, and two of
@@ -151,6 +163,58 @@ fi
 # targets. It matters most for ~/.ssh/config: a template-mode entry overwrites
 # a pre-existing real file SILENTLY — no error, no backup — where symlink mode
 # refuses (§2.26, reproduced against a real ~/.ssh/config).
+back_up() {
+    local target="$1" expanded bak n=1
+    expanded="${target/#\~/$HOME}"
+    # Real files only. A symlink is never data to mise, and replacing one is
+    # what an apply is for.
+    [[ -e "$expanded" && ! -L "$expanded" ]] || return 0
+    bak="$expanded.pre-mise.bak"
+    while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+    warn "Backing up $target → $bak before applying the companion repo"
+    mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+}
+
+# On the run that FIRST links the drop-in, read the companion's targets
+# straight out of its TOML rather than asking mise.
+#
+# Why not `mise dotfiles status` here: it proved unreliable at exactly this
+# moment. In repeated sandbox runs of this task, the status call issued
+# immediately after creating and trusting the drop-in sometimes did not list
+# the new entries at all, while the `dotfiles apply` a few lines later applied
+# them — so the backup silently did nothing and the template-mode ~/.ssh/config
+# was destroyed (§2.26). Reading the file we just linked has no such race, and
+# this is the one moment where being wrong costs a real file.
+backup_declared_targets() {
+    have python3 || return 0
+    local targets
+    targets="$(
+        python3 - "$SOURCE_CONF" <<'PY'
+import sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        sys.exit(0)
+try:
+    with open(sys.argv[1], "rb") as f:
+        data = tomllib.load(f)
+except Exception:
+    sys.exit(0)
+for target in data.get("dotfiles", {}):
+    print(target)
+PY
+    )" || return 0
+    while IFS= read -r target; do
+        [[ -n "$target" ]] && back_up "$target"
+    done <<<"$targets"
+}
+
+# On later runs the targets are already deployed, so a blanket backup would
+# archive the rendered file again on every bootstrap. Fall back to mise's own
+# drift detection there.
 backup_differing() {
     have python3 || return 0
     { mise dotfiles status --json 2>/dev/null || true; } \
@@ -168,18 +232,15 @@ for f in data.get("files", []):
         print(f["target"])
 ' \
         | while IFS= read -r target; do
-            expanded="${target/#\~/$HOME}"
-            # Real files only. A symlink is never data to mise, and replacing
-            # one is what an apply is for.
-            [[ -e "$expanded" && ! -L "$expanded" ]] || continue
-            bak="$expanded.pre-mise.bak"
-            n=1
-            while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
-            warn "Backing up $target → $bak before applying the companion repo"
-            mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+            back_up "$target"
         done
 }
-backup_differing
+
+if [[ "$FIRST_LINK" == true ]]; then
+    backup_declared_targets
+else
+    backup_differing
+fi
 
 # Apply now rather than leaving it for the next bootstrap: the very next chain
 # step (setup:git-signing) reads ~/.gitconfig.local.example, which this repo
@@ -190,4 +251,22 @@ if mise dotfiles apply --yes >/dev/null 2>&1 || mise dotfiles apply >/dev/null 2
 else
     warn "\`mise dotfiles apply\` failed after linking the companion repo"
     warn "(run it by hand to see why: mise dotfiles status)"
+fi
+
+# Template mode gives the rendered file the SOURCE's permissions — and git does
+# not carry them: it records only the executable bit, so a template committed
+# as 0600 comes out of a fresh clone at 0664 (umask), and the rendered
+# ~/.ssh/config with it. ssh then refuses the whole file ("Bad owner or
+# permissions"), which is a broken-ssh-on-a-new-machine bug that no amount of
+# chmod in the companion repo can prevent. Reproduced in a sandbox: 600 when
+# applying from the author's working copy, 664 from a clone of it.
+# So the guarantee has to be enforced here, on the deployed side.
+if [[ -d "$HOME/.ssh" ]]; then
+    chmod 700 "$HOME/.ssh"
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        [[ "$(stat -c '%a' "$f" 2>/dev/null)" == "600" ]] && continue
+        chmod 600 "$f"
+        ok_changed "Tightened $(basename "$f") to 0600 (git cannot carry file modes)"
+    done < <(find "$HOME/.ssh" -maxdepth 1 -type f 2>/dev/null)
 fi

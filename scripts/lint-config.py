@@ -99,6 +99,7 @@ def flatten_settings(data: dict, prefix: str = "") -> dict:
             flat[dotted] = value
     return flat
 
+
 # D9a: the only permitted self-management entries, and their only permitted home.
 SELF_MANAGED_KEYS = {
     "~/.config/mise/config*.toml",

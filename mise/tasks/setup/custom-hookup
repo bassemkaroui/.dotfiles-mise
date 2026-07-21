@@ -260,19 +260,23 @@ else
 fi
 
 # Template mode gives the rendered file the SOURCE's permissions — and git does
-# not carry them: it records only the executable bit, so a template committed
-# as 0600 comes out of a fresh clone at 0664 (umask), and the rendered
-# ~/.ssh/config with it. ssh then refuses the whole file ("Bad owner or
-# permissions"), which is a broken-ssh-on-a-new-machine bug that no amount of
-# chmod in the companion repo can prevent. Reproduced in a sandbox: 600 when
-# applying from the author's working copy, 664 from a clone of it.
-# So the guarantee has to be enforced here, on the deployed side.
-if [[ -d "$HOME/.ssh" ]]; then
-    chmod 700 "$HOME/.ssh"
-    while IFS= read -r f; do
-        [[ -f "$f" ]] || continue
-        [[ "$(stat -c '%a' "$f" 2>/dev/null)" == "600" ]] && continue
-        chmod 600 "$f"
-        ok_changed "Tightened $(basename "$f") to 0600 (git cannot carry file modes)"
-    done < <(find "$HOME/.ssh" -maxdepth 1 -type f 2>/dev/null)
+# not carry them: it records only the executable bit, so a template committed as
+# 0600 comes out of a fresh clone at 0664, and the rendered ~/.ssh/config with
+# it. ssh then refuses the file ("Bad owner or permissions").
+#
+# Fix the SOURCE, not the rendered file. Chmod'ing mise's output instead makes
+# `mise dotfiles status` report `differs (permissions differ)` forever — the
+# target no longer matches the source — so `status --missing` exits 1 and every
+# apply rewrites the mode back. CI caught exactly that loop.
+chmod 700 "$HOME/.ssh" 2>/dev/null || true
+if have python3 && [[ -f "$REPO/scripts/dotfiles-targets.py" ]]; then
+    while IFS=$'\t' read -r target source; do
+        # shellcheck disable=SC2088  # a literal "~/" prefix as mise writes it in config, not a path to expand
+        [[ "$target" == "~/.ssh/"* && -n "$source" ]] || continue
+        expanded_source="${source/#\~/$HOME}"
+        [[ -f "$expanded_source" ]] || continue
+        [[ "$(stat -c '%a' "$expanded_source" 2>/dev/null)" == "600" ]] && continue
+        chmod 600 "$expanded_source"
+        ok_changed "Tightened $(basename "$expanded_source") to 0600 (git cannot carry file modes)"
+    done < <(python3 "$REPO/scripts/dotfiles-targets.py" --with-source "$SOURCE_CONF" || true)
 fi

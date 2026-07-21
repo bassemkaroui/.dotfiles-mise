@@ -12,6 +12,11 @@ afterwards honoured them. The entry that gets missed is the template-mode
 error and no backup (plan §2.26). Reading the file we just linked has no such
 race.
 
+With --with-source it prints `target<TAB>source` instead, which the caller uses
+to fix up source permissions (git records no file modes, so a template
+committed 0600 arrives from a clone at 0664 — and template mode gives the
+rendered file the source's mode).
+
 Exit codes are meaningful, because "this config declares nothing" and "I could
 not read it" must not look alike to a caller that is about to overwrite files:
 
@@ -36,20 +41,28 @@ except ModuleNotFoundError:  # Python < 3.11 (Ubuntu 22.04)
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print(f"usage: {sys.argv[0]} <config.toml>", file=sys.stderr)
+    args = sys.argv[1:]
+    with_source = "--with-source" in args
+    args = [a for a in args if a != "--with-source"]
+    if len(args) != 1:
+        print(f"usage: {sys.argv[0]} [--with-source] <config.toml>", file=sys.stderr)
         return 4
     try:
-        with open(sys.argv[1], "rb") as f:
+        with open(args[0], "rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError) as e:
-        print(f"dotfiles-targets: cannot read {sys.argv[1]}: {e}", file=sys.stderr)
+        print(f"dotfiles-targets: cannot read {args[0]}: {e}", file=sys.stderr)
         return 4
     entries = data.get("dotfiles")
     if not isinstance(entries, dict):
         return 0
-    for target in entries:
-        print(target)
+    for target, value in entries.items():
+        if not with_source:
+            print(target)
+            continue
+        # mise accepts both the dict form and the `target = "source"` shorthand.
+        source = value.get("source") if isinstance(value, dict) else value
+        print(f"{target}\t{source}" if isinstance(source, str) else f"{target}\t")
     return 0
 
 

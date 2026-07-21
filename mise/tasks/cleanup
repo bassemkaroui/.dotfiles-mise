@@ -47,6 +47,18 @@ for link in "$CONF"/config*.toml "$CONF/tasks"; do
     [[ -e "$link" ]] || stale+=("$link")
 done
 
+# 1b. conf.d drop-ins — in practice the companion repo's 50-custom.toml, which
+#     setup:custom-hookup symlinks out of a clone the user may later delete. A
+#     dangling drop-in is harmless to mise (it simply omits the file), but it
+#     is exactly the invisible leftover this task exists for — and while it
+#     sits there `setup:custom-hookup` reports "already linked" and does
+#     nothing. These point OUTSIDE this repo, so the ownership test is "is a
+#     symlink whose target is gone", not "points into $REPO".
+for link in "$CONF"/conf.d/*; do
+    [[ -L "$link" && ! -e "$link" ]] || continue
+    stale+=("$link")
+done
+
 # 2. Deployed dotfiles. Scan ~ shallowly plus the XDG trees, where nested
 #    targets live (a flat -maxdepth would miss ~/.config/a/b/c).
 while IFS= read -r -d '' link; do

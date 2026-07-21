@@ -8,6 +8,17 @@
 # Both are pulled in by the [include] section at the bottom. git ignores an
 # include whose file does not exist, so a machine without either still gets a
 # working git — it just won't know who you are until you supply one.
+#
+# Deployed with mode = "copy", NOT symlink, deliberately. `git config --global`
+# writes THROUGH a symlink: git resolves it and rewrites the file it points at
+# (verified — the link survives, the target changes). With a symlink here, one
+# `git config --global user.email …`, one `gh auth login` or one
+# `git lfs install` would silently edit a tracked file inside a PUBLIC repo
+# working tree. Copy mode is what dotfiles.md recommends for "tools that
+# rewrite their config in place". The cost is that a local `git config
+# --global` is reverted by the next `mise dotfiles apply` — put per-machine
+# values in ~/.gitconfig.local, or `mise dotfiles add ~/.gitconfig` to keep an
+# edit you meant.
 
 [pull]
 	rebase = true

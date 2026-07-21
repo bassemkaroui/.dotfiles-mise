@@ -269,7 +269,16 @@ jobs:
             [[ "$out" == *LOGIN_OK* ]] || err "bash --login -c no longer runs its command (exec zsh regression)"
 
             # --- an interactive zsh must start clean on a fresh machine ---
-            zsh -ic "exit" </dev/null || err "interactive zsh failed to start"
+            # Under a PTY, not `zsh -ic … </dev/null`: without a terminal zsh
+            # cannot enable zle and exits non-zero with "can\x27t change option:
+            # zle", which says nothing about the config. This is plan §2.22\x27s
+            # lesson — measure interactivity from a real pty — and CI walked
+            # straight into it on its first run.
+            script -qec "zsh -ic exit" /dev/null >/tmp/zsh-smoke.log 2>&1 \
+              || { cat /tmp/zsh-smoke.log; err "interactive zsh failed to start"; }
+            # A clean start also means no error output from the rc files.
+            grep -qiE "command not found|parse error|no such file" /tmp/zsh-smoke.log \
+              && { cat /tmp/zsh-smoke.log; err "interactive zsh printed errors on startup"; } || true
 
             # --- M2: nothing may write into the repo working tree ---
             dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain)"

@@ -84,10 +84,25 @@ fi
 # [dotfiles] symlink — appending to it would write into the repo.
 LOGIN_FILE="$HOME/.bash_profile"
 
-if grep -q '^exec zsh$' "$LOGIN_FILE" 2>/dev/null; then
+if grep -q 'exec zsh -l' "$LOGIN_FILE" 2>/dev/null; then
     ok "exec zsh already in $LOGIN_FILE"
     exit 0
 fi
+# The old repo's bare `exec zsh` (which this file shipped until now) had two
+# defects, both inherited verbatim and both fixed below — CI asserts each:
+#
+#   1. It replaced the shell UNCONDITIONALLY, so `bash --login -c '<cmd>'`
+#      exec'd into an interactive zsh and never ran <cmd>. Every provisioning
+#      tool that shells in that way (ansible, `ssh host <cmd>`, docker exec
+#      -l, cloud-init) silently stopped working. Guarded on $- now: only an
+#      interactive login shell is replaced.
+#   2. Creating ~/.bash_profile makes bash stop reading ~/.profile entirely
+#      (it reads the first of .bash_profile/.bash_login/.profile that exists),
+#      so a machine that took this rung lost the PATH exports in ~/.profile
+#      for every non-interactive login shell. When we are the ones creating
+#      the file, it sources ~/.profile first.
+CREATED_LOGIN_FILE=false
+[[ -e "$LOGIN_FILE" ]] || CREATED_LOGIN_FILE=true
 
 if [[ -L "$LOGIN_FILE" ]]; then
     warn "$LOGIN_FILE is a symlink — refusing to append (it would edit the link target)"
@@ -98,7 +113,14 @@ fi
 {
     printf '\n# Added by mise run setup:login-shell-fallback — the account shell is\n'
     printf '# %s and could not be changed to zsh.\n' "${CURRENT_SHELL:-unknown}"
+    if [[ "$CREATED_LOGIN_FILE" == true ]]; then
+        printf '# This file did not exist before, and its mere existence stops bash from\n'
+        printf '# reading ~/.profile, so read it here.\n'
+        printf '[ -f "$HOME/.profile" ] && . "$HOME/.profile"\n'
+    fi
     printf 'export SHELL=%s\n' "$ZSH_PATH"
-    printf 'exec zsh\n'
+    printf '# Interactive login shells only: `bash --login -c "<cmd>"` must still run\n'
+    printf '# <cmd> instead of being replaced by an interactive zsh.\n'
+    printf 'case $- in *i*) exec zsh -l ;; esac\n'
 } >>"$LOGIN_FILE"
 ok_changed "Added 'exec zsh' to $LOGIN_FILE (login shell was ${CURRENT_SHELL:-unknown})"

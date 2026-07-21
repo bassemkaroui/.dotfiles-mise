@@ -236,14 +236,32 @@ else
 fi
 
 # ── 5. Validate config before handing over to mise ────────────────────────────
+run_lint() {
+    # rc 0 = clean, 1 = real problem (fatal), 2 = the linter could not run at
+    # all (no tomllib: Python < 3.11, i.e. Ubuntu 22.04). A missing stdlib
+    # module must not stop a machine from being installed — but it does mean
+    # this install gets no collision checking, so say so loudly.
+    local rc=0
+    python3 "$REPO/scripts/lint-config.py" "$@" || rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        2)
+            warn "Config lint unavailable on this python — continuing WITHOUT collision checking."
+            warn "(Install python3.11+ or python3-tomli to get it back.)"
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
 if command -v python3 &>/dev/null; then
-    python3 "$REPO/scripts/lint-config.py" || {
+    run_lint || {
         warn "Config collision lint failed — fix before bootstrapping."
         exit 1
     }
     # Machine-local drop-ins live outside the repo now; a single broken one
     # aborts every dotfiles apply, so check them too.
-    python3 "$REPO/scripts/lint-config.py" --live || {
+    run_lint --live || {
         warn "Machine-local mise config under $CONF failed the lint — fix before bootstrapping."
         exit 1
     }
@@ -434,6 +452,53 @@ mise trust "$CONF/config.toml" >/dev/null 2>&1 || true
 # were invisible above, and pass 2 is what applies them.
 guard_old_repo
 backup_conflicts
+
+# ── 7b. Repo health ───────────────────────────────────────────────────────────
+# `mise bootstrap` exits 1 at its repos step (step 2 of 11) if ANY declared
+# clone is dirty, and then never reaches dotfiles, tools or the imperative tail
+# (verified 2026-07-21: one untracked, non-gitignored file is enough —
+# `mise ERROR repos: ~/x has local changes`). This is easy to hit in practice:
+# oh-my-zsh creates ~/.oh-my-zsh/completions/, and generated `_tool` completion
+# files land inside the plugin clones — both are true on the author's laptop
+# right now. mise's own message names one path and offers no remedy, so
+# diagnose it here rather than half-configuring the machine.
+guard_repo_health() {
+    command -v python3 &>/dev/null || return 0
+    local rows=() row path state
+    mapfile -t rows < <(
+        { mise bootstrap repos status --json 2>/dev/null || true; } \
+            | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+for r in data.get("repos", []):
+    if r.get("state") in ("dirty", "conflict"):
+        print("%s|%s" % (r.get("state"), r.get("path")))
+'
+    )
+    ((${#rows[@]})) || return 0
+    warn "These [bootstrap.repos] clones would abort the bootstrap at its repos step:"
+    for row in "${rows[@]}"; do
+        state="${row%%|*}"
+        path="${row#*|}"
+        warn "    [$state] $path"
+    done
+    die "Clean them first: mise refuses to touch a repo with local changes, and that
+      failure aborts everything after it (dotfiles, tools, the whole task chain).
+        git -C <path> status                             # what is it?
+        git -C <path> clean -nd                          # dry-run; drop -n to delete
+        printf '<name>\\n' >> <path>/.git/info/exclude    # if it is generated
+      The last is the right answer for generated completions: mise treats a
+      gitignored file as clean (verified), and .git/info/exclude is local to the
+      clone, so it needs no upstream change. \`mise run update:repos\` reports the
+      same set later on."
+}
+guard_repo_health
 
 info "Running mise bootstrap..."
 mise bootstrap "${YES[@]}"

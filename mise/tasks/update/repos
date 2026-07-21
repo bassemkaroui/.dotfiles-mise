@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+#MISE description="Fast-forward the [bootstrap.repos] clones that track a branch (oh-my-zsh, plugins, oh-my-tmux, …)"
+#MISE raw=true
+#USAGE flag "--check" help="Fetch and report what would be pulled, without moving any checkout"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="update:repos"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# D11 — the successor to the old repo's `update:submodules`.
+#
+# The old repo carried oh-my-tmux and the nvim config as git submodules, so
+# staying current meant bumping a committed pointer. Here they are
+# [bootstrap.repos] clones at their live paths, and WHO updates them depends on
+# whether the entry declares a `ref` — the opposite way round from what
+# "pinned" suggests (verified 2026-07-21, mise 2026.7.7):
+#
+#   ref = "<branch>"   MISE owns it: every `mise bootstrap` fast-forwards it
+#                      (state `differs` → "applied ~/x"). ~/.tmux and the nvim
+#                      config are in this class, so this task only reports them.
+#   ref = <tag/sha>    genuinely pinned; nothing moves it.
+#   no ref             MISE NEVER TOUCHES IT after the first clone ("an
+#                      existing repo with the expected origin is considered
+#                      current" — verified: an unpinned clone stayed put while
+#                      upstream was two commits ahead). oh-my-zsh, the three
+#                      zsh plugins, p10k, fzf-tab and PathPicker are in this
+#                      class and would otherwise sit at their clone-day commit
+#                      forever. THIS is the set the task exists to move.
+#
+# The docs advertise `mise bootstrap repos update` and `... repos exec` for
+# exactly this. NEITHER EXISTS in mise 2026.7.7 — `mise bootstrap repos --help`
+# lists only `apply` and `status` (verified 2026-07-21), so the git work is
+# done here. If a later mise ships them, this task becomes a thin wrapper.
+#
+# Rules:
+#   - a dirty repo is never touched — and dirt is worse than untidy here: ANY
+#     untracked non-ignored file in ANY declared clone makes `mise bootstrap`
+#     itself exit 1 at step 2, before dotfiles, tools and the entire imperative
+#     tail (verified; gitignored files are fine). It is reported below as the
+#     bootstrap-breaking problem it is, with the remedy.
+#   - only fast-forward: no merges, no rebases, no resets, ever
+
+CHECK="${usage_check:-false}"
+
+have git || fail "git not found in PATH"
+have python3 || fail "python3 is required to read \`mise bootstrap repos status --json\`"
+
+# `|| true` + an empty-input guard: a status failure (untrusted config, no
+# config at all) must not read as "there are no repos".
+status_json="$(mise bootstrap repos status --json 2>/dev/null || true)"
+[[ -n "$status_json" ]] || fail "Could not read repo status — is this machine bootstrapped? (mise bootstrap status)"
+
+# path <US> ref <US> state. The separator is ASCII Unit Separator (0x1f), NOT a
+# tab: tab is an IFS *whitespace* character, so `read` collapses runs of them
+# and an empty `ref` field would silently shift `state` one column left —
+# reproduced in the sandbox, where every repo was reported as "pinned to
+# 'current'" and nothing was ever pulled.
+US=$'\x1f'
+mapfile -t rows < <(
+    printf '%s' "$status_json" | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+for r in data.get("repos", []):
+    print("\x1f".join([r.get("path") or "", r.get("ref") or "", r.get("state") or ""]))
+'
+)
+((${#rows[@]} > 0)) || {
+    ok "No [bootstrap.repos] entries declared"
+    exit 0
+}
+
+updated=0
+failed=0
+
+for row in "${rows[@]}"; do
+    IFS="$US" read -r path ref state <<<"$row"
+    [[ -n "$path" ]] || continue
+    name="${path/#$HOME/\~}"
+
+    case "$state" in
+        missing)
+            info "$name — not cloned yet (run: mise bootstrap --yes)"
+            continue
+            ;;
+        dirty)
+            warn "$name — has local changes; THIS BREAKS \`mise bootstrap\` (it exits 1"
+            warn "        at the repos step, before dotfiles/tools/tasks). Fix with one of:"
+            warn "          git -C $path status            # see what it is"
+            warn "          git -C $path clean -nd         # dry-run; drop -n to delete"
+            warn "          printf '%s\\n' <path> >> $path/.git/info/exclude   # if generated"
+            ((failed++)) || true
+            continue
+            ;;
+        conflict)
+            # Documented state (bootstrap/repos.md "States"): the target path is
+            # not the expected git repo. Also fatal to `mise bootstrap`.
+            warn "$name — not the expected git repo (wrong origin, or not a repo at all)"
+            ((failed++)) || true
+            continue
+            ;;
+        differs)
+            # Only reachable with a `ref`: the checkout is clean but not at the
+            # configured ref. `mise bootstrap` will fast-forward it — unless the
+            # local branch has diverged, in which case the ff fails and takes the
+            # whole bootstrap with it (verified: rc=1).
+            if git -C "$path" merge-base --is-ancestor HEAD "origin/${ref:-HEAD}" 2>/dev/null; then
+                info "$name — behind '$ref'; \`mise bootstrap\` will fast-forward it"
+            else
+                warn "$name — DIVERGED from '$ref': \`mise bootstrap\` will fail here (no fast-forward)."
+                warn "        Rebase or reset it: git -C $path log --oneline origin/$ref..HEAD"
+                ((failed++)) || true
+            fi
+            continue
+            ;;
+    esac
+    if [[ -n "$ref" ]]; then
+        info "$name — tracks '$ref'; mise keeps it current on every bootstrap"
+        continue
+    fi
+
+    branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    if [[ -z "$branch" ]]; then
+        warn "$name — detached HEAD, leaving it alone"
+        continue
+    fi
+    if ! git -C "$path" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null \
+        && ! git -C "$path" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+        warn "$name — branch '$branch' has no counterpart on origin, leaving it alone"
+        continue
+    fi
+
+    before="$(git -C "$path" rev-parse HEAD)"
+    if ! git -C "$path" fetch --quiet origin "$branch" 2>/dev/null; then
+        warn "$name — fetch failed (offline?), leaving it alone"
+        ((failed++)) || true
+        continue
+    fi
+    after="$(git -C "$path" rev-parse "origin/$branch")"
+
+    if [[ "$before" == "$after" ]]; then
+        ok "$name — already current on $branch (${before:0:7})"
+        continue
+    fi
+    if [[ "$CHECK" == "true" ]]; then
+        info "$name — ${before:0:7} → ${after:0:7} available on $branch (--check: not pulled)"
+        ((updated++)) || true
+        continue
+    fi
+    if git -C "$path" merge --ff-only --quiet "origin/$branch" 2>/dev/null; then
+        ok_changed "$name — ${before:0:7} → ${after:0:7} on $branch"
+        ((updated++)) || true
+    else
+        warn "$name — not a fast-forward from origin/$branch, leaving it alone"
+        ((failed++)) || true
+    fi
+done
+
+echo
+if ((failed)); then
+    warn "$failed repo(s) could not be updated — see above"
+fi
+if ((updated == 0)); then
+    ok "All updatable repos are current"
+elif [[ "$CHECK" == "true" ]]; then
+    info "$updated repo(s) have updates available (run without --check to pull)"
+else
+    ok_changed "Updated $updated repo(s)"
+fi
+((failed == 0))

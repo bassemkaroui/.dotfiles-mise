@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#MISE description="Check for and install a newer Obsidian AppImage release"
+#MISE raw=true
+#USAGE flag "--check" help="Report an available update without installing it"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="update:obsidian"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/obsidian.sh
+source "$LIB/obsidian.sh"
+
+# Port of the old repo's update:obsidian. Gone: the .install-exclude registry
+# check (opt-out is now the `graphical` profile, and this task is never in the
+# bootstrap chain anyway).
+#
+# The division of labour with install:obsidian, which shares lib/obsidian.sh:
+#   install:obsidian   runs in the chain; installs when absent, otherwise only
+#                      REPORTS an available upgrade unless given --update, so a
+#                      routine `mise bootstrap` never swaps a running editor's
+#                      binary underneath it.
+#   update:obsidian    run by hand, when you have decided to upgrade: it
+#                      installs the newer release. It never installs Obsidian
+#                      from scratch — that is install:obsidian's job, and doing
+#                      it here would resurrect it on a machine that removed it.
+# No require_profile: you may sensibly update a machine whose profile list has
+# since changed. It simply does nothing when Obsidian isn't installed.
+
+CHECK="${usage_check:-false}"
+
+CURRENT="$(obsidian_installed_version)"
+if [[ -z "$CURRENT" ]]; then
+    warn "Obsidian is not installed here — install it with: mise run install:obsidian"
+    exit 0
+fi
+ok "Obsidian installed: $CURRENT"
+
+obsidian_fetch_release || skip "Could not reach the GitHub releases API"
+LATEST="$(obsidian_latest_version)"
+[[ -n "$LATEST" ]] || skip "Could not determine the latest Obsidian version"
+
+if [[ "$CURRENT" == "$LATEST" ]]; then
+    ok "Obsidian is up to date ($CURRENT)"
+    exit 0
+fi
+
+if [[ "$CHECK" == "true" ]]; then
+    info "Obsidian $LATEST is available (installed: $CURRENT) — run without --check to install"
+    exit 0
+fi
+
+info "Updating Obsidian $CURRENT → $LATEST"
+obsidian_install_appimage "$LATEST" "$(obsidian_appimage_url)"
+ok "Obsidian updated to $(obsidian_installed_version)"

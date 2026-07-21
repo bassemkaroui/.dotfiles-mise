@@ -38,6 +38,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# This shell (and any parent that ran `mise activate`) may export MISE_* vars
+# that silently point the sandbox back at the REAL config: MISE_TRUSTED_CONFIG_PATHS
+# is set to ~/.config/mise on the author's machine, which would make every
+# sandbox inherit trust it should have had to establish itself — exactly the
+# class of behaviour (§2.10) this harness exists to reproduce.
+unset MISE_TRUSTED_CONFIG_PATHS MISE_GLOBAL_CONFIG_FILE MISE_CONFIG_DIR MISE_ENV \
+    MISE_DATA_DIR MISE_STATE_DIR MISE_CACHE_DIR
+
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-mise-sandbox.XXXXXX")"
 [[ $KEEP -eq 1 ]] || trap 'rm -rf "$SANDBOX"' EXIT
 

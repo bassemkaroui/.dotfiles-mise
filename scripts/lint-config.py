@@ -33,7 +33,22 @@ import argparse
 import glob
 import os
 import sys
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (Ubuntu 22.04 ships 3.10)
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        # Exit 2, not 1: "I could not lint" is not "the config is broken", and
+        # install.sh must not refuse to install a machine over a missing stdlib
+        # module. It degrades to a warning on 2 and still aborts on 1.
+        print(
+            "lint-config: needs Python 3.11+ (tomllib) or the `tomli` package "
+            "(apt install python3-tomli) — cannot lint",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 MISE_DIR = os.path.join(REPO, "mise")

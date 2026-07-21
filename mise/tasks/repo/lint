@@ -5,10 +5,16 @@
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
-TASK_NAME="lint"
-# shellcheck source=lib/profile.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/profile.sh"
+TASK_NAME="repo:lint"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
+# Namespaced `repo:` on purpose. mise/tasks is symlinked to ~/.config/mise/tasks,
+# so every file here is a GLOBAL task in every directory on the machine — the old
+# repo kept `lint` out of that namespace by putting it in a repo-scoped
+# .mise/tasks instead. A bare `mise run lint` that shellchecks the dotfiles repo
+# from inside someone else's project is a surprise; `mise run repo:lint` is not.
+#
 # CI calls THIS TASK rather than re-implementing the checks (the old repo kept
 # two copies of the find(1) invocation in sync by hand, and the plan's §0.1
 # "always green before committing" list was a third). One definition, so a file
@@ -123,10 +129,16 @@ fi
 syntax_check() {
     local checker="$1" f
     shift
-    have "$checker" || {
-        warn "$checker not found — skipping its syntax checks"
+    if ! have "$checker"; then
+        # Silently skipping in CI would mean the zsh half of this never ran and
+        # nobody noticed (GitHub's runner image does not guarantee zsh).
+        if [[ -n "${CI:-}" ]]; then
+            step_failed "$checker not found, but CI must run every check (apt-get install -y $checker)"
+        else
+            warn "$checker not found — skipping its syntax checks"
+        fi
         return 0
-    }
+    fi
     for f in "$@"; do
         [[ -f "$f" ]] || continue
         "$checker" -n "$f" || step_failed "$checker -n failed: $f"

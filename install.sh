@@ -235,6 +235,18 @@ else
     ok "Wrote ~/.config/mise/miserc.toml (profiles: ${selected[*]:-none})"
 fi
 
+# ── 4a. python3 is a hard requirement ─────────────────────────────────────────
+# Not a nicety: three safety nets are written in it — the old-repo guard, the
+# conflict backup (the only thing standing between a template-mode entry and a
+# real ~/.ssh/config, §2.26) and the collision lint. Skipping them silently on a
+# host without python3 is how a "successful" install eats a file. Every
+# Debian-family system this repo targets ships it.
+command -v python3 &>/dev/null \
+    || die "python3 is required (sudo apt-get install -y python3).
+      install.sh's guards — old-repo detection, conflict backup and the config
+      collision lint — are all written in python3, and running without them can
+      overwrite real files (a template-mode dotfile replaces one silently)."
+
 # ── 4b. Companion repo drop-in (before the lint/guard/backup block) ───────────
 # The private companion repo (CUSTOM.md) owns one config file, which belongs at
 # ~/.config/mise/conf.d/50-custom.toml. setup:custom-hookup also creates that
@@ -257,8 +269,28 @@ if [[ -f "$CUSTOM_CONF" ]]; then
         ok "Companion repo already linked into conf.d"
     else
         ln -sfn "$CUSTOM_CONF" "$DROPIN"
+        LINKED_DROPIN="$DROPIN"
         ok "Linked the companion repo: $DROPIN -> $CUSTOM_CONF"
     fi
+
+    # Back up what the companion is about to deploy, keyed on its config file
+    # rather than on `mise dotfiles status`. The status view of a just-created
+    # drop-in proved unreliable — observed in repeated sandbox runs of
+    # setup:custom-hookup, where status omitted the new entries while the apply
+    # moments later honoured them — and the entry it would miss is the
+    # template-mode ~/.ssh/config, which overwrites a real file with no error
+    # and no backup (§2.26). backup_conflicts further down still runs, and
+    # still covers drift on later runs.
+    while IFS= read -r target; do
+        [[ -n "$target" ]] || continue
+        expanded="${target/#\~/$HOME}"
+        [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+        bak="$expanded.pre-mise.bak"
+        n=1
+        while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+        warn "Backing up $target -> $bak (declared by the companion repo)"
+        mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+    done < <(python3 "$REPO/scripts/dotfiles-targets.py" "$CUSTOM_CONF" || true)
 fi
 
 # ── 5. Validate config before handing over to mise ────────────────────────────
@@ -280,20 +312,24 @@ run_lint() {
     esac
 }
 
-if command -v python3 &>/dev/null; then
-    run_lint || {
-        warn "Config collision lint failed — fix before bootstrapping."
-        exit 1
-    }
-    # Machine-local drop-ins live outside the repo now; a single broken one
-    # aborts every dotfiles apply, so check them too.
-    run_lint --live || {
-        warn "Machine-local mise config under $CONF failed the lint — fix before bootstrapping."
-        exit 1
-    }
-else
-    warn "python3 not found — skipping config collision lint"
-fi
+run_lint || {
+    warn "Config collision lint failed — fix before bootstrapping."
+    exit 1
+}
+# Machine-local drop-ins live outside the repo now; a single broken one
+# aborts every dotfiles apply, so check them too.
+run_lint --live || {
+    # A drop-in THIS RUN created, that then fails the lint, must not be left
+    # behind: an entry with a missing source aborts every later `mise
+    # dotfiles apply` on the machine, main repo included (§2.16). Only
+    # unlink what we linked — never a file the user placed by hand.
+    if [[ -n "${LINKED_DROPIN:-}" && -L "$LINKED_DROPIN" ]]; then
+        rm -f "$LINKED_DROPIN"
+        warn "Removed $LINKED_DROPIN again — it is what the lint rejected."
+    fi
+    warn "Machine-local mise config under $CONF failed the lint — fix before bootstrapping."
+    exit 1
+}
 
 # ── 6. Trust + back up conflicting dotfile targets ────────────────────────────
 mise trust "$REPO/mise/config.toml" >/dev/null

@@ -88,6 +88,26 @@ if grep -q 'exec zsh -l' "$LOGIN_FILE" 2>/dev/null; then
     ok "exec zsh already in $LOGIN_FILE"
     exit 0
 fi
+
+# A machine that took this rung under the OLD repo (or under this task before
+# the guard existed) has a bare `exec zsh` line. It does not match the check
+# above, so appending would leave TWO blocks with the unguarded one first —
+# reached first, so both defects below would survive on exactly the machines
+# that already have the problem. Rewrite it in place instead.
+if grep -qE '^[[:space:]]*exec zsh[[:space:]]*$' "$LOGIN_FILE" 2>/dev/null; then
+    if sed -i -E 's|^[[:space:]]*exec zsh[[:space:]]*$|case $- in *i*) exec zsh -l ;; esac|' "$LOGIN_FILE"; then
+        ok_changed "Rewrote the legacy unconditional \`exec zsh\` in $LOGIN_FILE"
+        # ~/.profile: only source it if this file does not already, and only
+        # when nothing else would have. Appending blindly risks double-sourcing.
+        if ! grep -q '\.profile' "$LOGIN_FILE" 2>/dev/null && [[ -f "$HOME/.profile" ]]; then
+            printf '\n# ~/.bash_profile shadows ~/.profile for login bash — read it.\n[ -f "$HOME/.profile" ] && . "$HOME/.profile"\n' >>"$LOGIN_FILE"
+            ok_changed "Added the missing ~/.profile source to $LOGIN_FILE"
+        fi
+        exit 0
+    fi
+    warn "Could not rewrite the legacy \`exec zsh\` line in $LOGIN_FILE — edit it by hand"
+    exit 0
+fi
 # The old repo's bare `exec zsh` (which this file shipped until now) had two
 # defects, both inherited verbatim and both fixed below — CI asserts each:
 #

@@ -185,30 +185,24 @@ back_up() {
 # them — so the backup silently did nothing and the template-mode ~/.ssh/config
 # was destroyed (§2.26). Reading the file we just linked has no such race, and
 # this is the one moment where being wrong costs a real file.
+# Returns non-zero when it could NOT establish the target list. That
+# distinction is the whole point: "no targets" and "I cannot tell" look
+# identical to a caller that only checks output, and the second one must never
+# be allowed to reach the apply. Exit codes: 3 = no TOML parser (Python < 3.11
+# without tomli — stock Ubuntu 22.04), 4 = unreadable/malformed config.
 backup_declared_targets() {
-    have python3 || return 0
-    local targets
-    targets="$(
-        python3 - "$SOURCE_CONF" <<'PY'
-import sys
-try:
-    import tomllib
-except ModuleNotFoundError:
-    try:
-        import tomli as tomllib
-    except ModuleNotFoundError:
-        sys.exit(0)
-try:
-    with open(sys.argv[1], "rb") as f:
-        data = tomllib.load(f)
-except Exception:
-    sys.exit(0)
-for target in data.get("dotfiles", {}):
-    print(target)
-PY
-    )" || return 0
+    have python3 || return 1
+    [[ -f "$REPO/scripts/dotfiles-targets.py" ]] || return 1
+    local targets rc=0
+    targets="$(python3 "$REPO/scripts/dotfiles-targets.py" "$SOURCE_CONF")" || rc=$?
+    ((rc == 0)) || return "$rc"
     while IFS= read -r target; do
-        [[ -n "$target" ]] && back_up "$target"
+        # `|| continue`, never `&& back_up`: with an empty target list the
+        # latter leaves the loop's status at 1, which under `set -e` exits the
+        # task — and a non-zero task aborts every later step of the bootstrap
+        # chain (§2.21), taking git-signing and the login-shell fallback with it.
+        [[ -n "$target" ]] || continue
+        back_up "$target"
     done <<<"$targets"
 }
 
@@ -237,7 +231,19 @@ for f in data.get("files", []):
 }
 
 if [[ "$FIRST_LINK" == true ]]; then
-    backup_declared_targets
+    # If the backup pass cannot run, DO NOT APPLY. The drop-in stays linked, so
+    # the next `mise bootstrap` on a repaired machine converges — but nothing
+    # here is allowed to hand an unprotected apply to template mode, which
+    # replaces a real ~/.ssh/config with no error and no backup (§2.26).
+    # Without this, a host with no python3 (or with Python < 3.11 and no tomli)
+    # lost that file silently while the task printed "OK".
+    if ! backup_declared_targets; then
+        warn "Could not read the companion's targets (no python3, no TOML parser,"
+        warn "or an unreadable $SOURCE_CONF) — so nothing could be backed up."
+        warn "NOT applying: a template-mode entry overwrites a real file without one."
+        warn "Install python3 (>= 3.11, or python3-tomli), then: mise run setup:custom-hookup"
+        exit 0
+    fi
 else
     backup_differing
 fi

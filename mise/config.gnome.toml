@@ -12,18 +12,19 @@
 # (jq, also needed by the extensions task, is a core [tools] entry.)
 "apt:dconf-cli" = "latest"
 
-[dotfiles]
-# GTK/shell themes, vendored from the old repo's gnome_themes package. Whole-dir
-# symlinks are fine here (unlike ~/.gnupg or ~/.claude — D8): these trees are
-# third-party, read-only, and nothing writes into them at runtime.
+# No [dotfiles] here. The old repo's `gnome_themes` package vendored two GTK
+# themes (WhiteSur-dark, ChromeOS-dark-compact — 582 files, 4.5 MB) and this
+# repo carried them through Phase 4. They are dropped as of session C, by user
+# decision once this repo was declared PUBLIC-intended: every machine using it
+# should end up the same, a vendored third-party theme tree is not something a
+# public repo should redistribute, and the themes only ever applied on the
+# `gnome` profile. Install them from upstream if you want them:
 #
-# Dropping the profile leaves the links in place: mise has no removal semantics,
-# and `mise run cleanup` only reaps links whose SOURCE is gone (verified), not
-# links whose profile was deselected. Delete ~/.themes/<name> by hand if you
-# switch desktops — cleanup covers the other case, a theme removed from the repo,
-# which is why it now scans ~/.themes at all.
-"~/.themes/WhiteSur-dark" = { mode = "symlink" }
-"~/.themes/ChromeOS-dark-compact" = { mode = "symlink" }
+#   WhiteSur-dark          https://github.com/vinceliuice/WhiteSur-gtk-theme
+#   ChromeOS-dark-compact  a GNOME-Look/ChromeOS GTK theme
+#
+# Anything under ~/.themes left over from an earlier deploy is reaped by
+# `mise run cleanup` (it scans ~/.themes precisely for this case).
 
 # NOT declared here: the GNOME Shell extension manifest
 # (~/.local/share/gnome-extensions/manifest.txt) and its dconf dump. Those are

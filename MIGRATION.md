@@ -11,7 +11,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | ~~Stow packages `fzf bat tmux gh gh-dash claude ruff hunk gpg yazi`~~ ✅ | `[dotfiles]` core entries (+ `yazi` profile) | 2 |
 | ~~Stow package `ghostty` (config only)~~ ✅ | `graphical` profile `[dotfiles]` | 2 |
 | ~~Stow package `nvim`~~ ✅ | `neovim` profile `[bootstrap.repos]` | 1 |
-| ~~Stow package `gnome_themes` (+DE auto-exclude)~~ ✅ | `gnome` profile `[dotfiles]` (`home/.themes/`) | 4 |
+| ~~Stow package `gnome_themes` (+DE auto-exclude)~~ ✅ | **dropped in session C** — see below; the `gnome` profile now carries only `apt:dconf-cli` and the extension tasks | 4, 6 |
 | ~~Stow package `mise` (nested stow)~~ ✅ | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
 | ~~conf.d tool groups (`runtime cli dev ai yazi neovim`)~~ ✅ | core `[tools]` + profile files | 1–2 |
 | ~~`.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + their picker tasks~~ ✅ | `mise/miserc.toml` profiles | 0 |
@@ -83,6 +83,13 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   `media` profile). What survives is `build-essential` + `pkg-config`, which is what the `cargo:`
   backend needs. If a tool later fails to build for want of `libssl-dev` or `libclang-dev`, add
   it back to `[bootstrap.packages]` — that is the intended repair, not a regression.
+- **The two vendored GTK themes** (`WhiteSur-dark`, `ChromeOS-dark-compact` — 582 files,
+  4.5 MB), ported in Phase 4 and removed in session C once the user decided this repo is
+  **intended to be public**: every machine using it should end up the same, a public repo
+  should not redistribute a third-party theme tree, and the themes only ever applied under the
+  `gnome` profile. Install them from upstream (WhiteSur:
+  https://github.com/vinceliuice/WhiteSur-gtk-theme) if you want them; `mise run cleanup` reaps
+  the leftover `~/.themes/*` links.
 - **The `busybox unzip` third-choice font extractor** (`setup:zsh` had unzip → python3 →
   busybox). `unzip` is a `[bootstrap.packages]` entry and python3 is required by
   `install.sh` anyway, so the third rung had no reachable audience.
@@ -140,8 +147,13 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   change the mode afterwards.
 - **`mode = "template"` overwrites a pre-existing real file silently** — no error, no backup,
   where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target,
-  not just symlink-mode ones. This is why the cutover backup tar matters even though mise
-  "shouldn't" clobber anything.
+  not just symlink-mode ones, and additionally backs up every target the companion repo
+  declares before its first apply (keyed on the config file, not on `mise dotfiles status`,
+  whose view of a just-created drop-in proved unreliable). This is why the cutover backup tar
+  matters even though mise "shouldn't" clobber anything.
+- **git carries no file modes** beyond the executable bit, so a template committed 0600 renders
+  0664 from a clone — and ssh rejects a group-writable config outright.
+  `setup:custom-hookup` re-applies 0700/0600 under `~/.ssh` after applying.
 - **No `[bootstrap.user]` section, deliberately.** Its one command is a bare `chsh -s`, which
   PAM-prompts and so fails unattended — and a failing bootstrap step aborts every later step,
   including the whole `[tasks.bootstrap]` tail. `setup:login-shell-fallback` owns the login

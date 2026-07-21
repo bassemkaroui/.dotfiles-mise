@@ -21,7 +21,14 @@ jobs:
         # zsh is NOT guaranteed on the runner image, and repo:lint fails rather
         # than skipping when $CI is set — a silently-skipped `zsh -n` would mean
         # a syntax error in .zshrc reaching every machine.
-        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y shellcheck zsh
+          # ruff is optional in the task (it is not a [bootstrap.packages]
+          # entry), so install it here to make sure CI never takes the
+          # skip-with-a-notice path.
+          pipx install ruff || pip install --user ruff || sudo apt-get install -y ruff
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install mise
         run: |
           curl -fsSL https://mise.run | sh

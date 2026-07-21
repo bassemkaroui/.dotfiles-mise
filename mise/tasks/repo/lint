@@ -99,6 +99,33 @@ if have python3; then
             || step_failed "python syntax error in $f"
     done
     ok "python syntax OK (${#PY_FILES[@]} files)"
+
+    # compile() only proves a file PARSES: a call to an undefined name compiles
+    # cleanly and explodes at runtime — in scripts whose whole job is to stop a
+    # bad config reaching a real $HOME. `--select F,E9` is pyflakes plus syntax
+    # errors: undefined names, unused imports, f-strings with no placeholder.
+    #
+    # `--isolated` is essential. Without it ruff picks up whatever ruff.toml the
+    # MACHINE has — this repo deploys one to ~/.config/ruff with the author's
+    # personal S/PLR rules — so the gate would pass or fail depending on whose
+    # laptop it ran on, and CI (with no such file) would disagree with everyone.
+    #
+    # Optional rather than required: ruff is not a [bootstrap.packages] entry.
+    RUFF=()
+    if have ruff; then
+        RUFF=(ruff)
+    elif have uvx; then
+        RUFF=(uvx ruff)
+    fi
+    if ((${#RUFF[@]})); then
+        if "${RUFF[@]}" check --isolated --select F,E9 --quiet "${PY_FILES[@]}"; then
+            ok "ruff check passed (${#PY_FILES[@]} files)"
+        else
+            step_failed "ruff reported issues (see above)"
+        fi
+    else
+        info "ruff not available — skipping the python lint (syntax was still checked)"
+    fi
 elif [[ -n "${CI:-}" ]]; then
     # Same reasoning as shellcheck below and the syntax checks further down: a
     # silently skipped check in CI is worse than no check, because it reports

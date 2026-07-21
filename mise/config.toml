@@ -231,7 +231,12 @@ run = [
 # neither of which this repo ships — they come from the private companion repo
 # and from setup:git-signing (D12). git ignores a missing include, so a machine
 # without either still has a working git.
-"~/.gitconfig" = { mode = "symlink" }
+#
+# copy, not symlink: `git config --global` follows the symlink and rewrites the
+# file it points at, so a single `git config --global user.email` (or `gh auth
+# login`, or `git lfs install`) edits a tracked file inside this repo — which is
+# public. See the header of home/.gitconfig.
+"~/.gitconfig" = { mode = "copy" }
 # Sourced by the guarded stanzas in home/.bashrc.
 "~/.git-completion.bash" = { mode = "symlink" }
 "~/.git-prompt.sh" = { mode = "symlink" }

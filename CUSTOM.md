@@ -17,13 +17,16 @@ bootstrap logic — just files plus one small config file that says where they g
 ## How it is wired
 
 `mise/config.custom.toml` is symlinked to `~/.config/mise/conf.d/50-custom.toml`,
-which mise loads alongside this repo's config — no `mise trust` prompt needed for
-a symlinked drop-in (verified). Two things create that link, deliberately:
+where mise loads it alongside this repo's config **once it is trusted**. That
+last part is not a formality: an untrusted drop-in is *silently ignored* — no
+prompt, no error, `mise dotfiles status` exits 0 and simply does not list its
+entries — so the companion would look wired up and deploy nothing. Both entry
+points below run `mise trust` on it. Two things create the link, deliberately:
 
 | Where | When | Why both |
 |---|---|---|
 | `install.sh` (step 4b) | the clone already exists | so the companion's entries are visible to the collision lint, the old-repo guard and the **conflict backup**, all of which run before `mise bootstrap` |
-| `setup:custom-hookup` | inside `[tasks.bootstrap]`, step 12 | the fresh machine, where the companion is *cloned by that task* — long after `install.sh` has finished. It repeats the backup pass for the same reason |
+| `setup:custom-hookup` | inside `[tasks.bootstrap]`, step 12 | the fresh machine, where the companion is *cloned by that task* — long after `install.sh` has finished. It repeats the trust, lint and backup work for the same reason |
 
 `setup:custom-hookup` also clones the companion when it is missing, deriving the
 URL from this repo's `origin` by naming convention
@@ -94,10 +97,18 @@ A file that differs per machine is **one** template branching on the profiles in
 `templates/ssh_config.tmpl.example` in this repo documents the mechanism.
 
 > **Template mode overwrites a pre-existing real file silently** — no error, no
-> backup, where `mode = "symlink"` refuses. That is why both entry points above
-> back up every *differing* target first, and why `chmod 600` on the template
-> matters: the rendered file inherits the source's permissions, and ssh rejects
-> a group-readable config.
+> backup, where `mode = "symlink"` refuses. Both entry points therefore back up
+> first, keyed on `config.custom.toml`'s own target list (via
+> `scripts/dotfiles-targets.py`) rather than on `mise dotfiles status`, whose
+> view of a just-created drop-in proved unreliable. **If that list cannot be
+> read — no `python3`, or Python < 3.11 without `tomli` — neither entry point
+> applies anything at all**: an unprotected apply is worse than an unapplied
+> companion.
+>
+> `chmod 600` on the template is necessary but *not sufficient*: git records
+> only the executable bit, so a template committed 0600 arrives from a clone at
+> 0664 and the rendered file inherits that. `setup:custom-hookup` enforces 0700
+> on `~/.ssh` and 0600 on the files in it after applying.
 
 ## If you don't have a companion repo
 

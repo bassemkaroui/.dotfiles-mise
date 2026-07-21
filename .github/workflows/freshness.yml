@@ -48,12 +48,17 @@ jobs:
           set -euo pipefail
           title="A [bootstrap.repos] entry no longer resolves"
           # Update the existing issue rather than opening a second one every month.
-          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          # Dedup on a LABEL, not a title search: GitHub's search tokenizer
+          # does not reliably match a title containing [ ] and ., so the
+          # "comment on the existing one" branch would silently miss and open a
+          # fresh issue every month.
+          gh label create freshness --description "Automated repo-freshness check" --color ededed 2>/dev/null || true
+          existing="$(gh issue list --state open --label freshness --json number --jq '.[0].number // empty')"
           body="$(printf 'Monthly freshness check failed. A declared repo is unreachable or its ref is gone.\n\nThis aborts `mise bootstrap` at its repos step, so **every fresh install breaks** until it is fixed.\n\n```\n%s\n```\n\n(run: %s)\n' "$(cat /tmp/report.txt)" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
           if [[ -n "$existing" ]]; then
             gh issue comment "$existing" --body "$body"
           else
-            gh issue create --title "$title" --body "$body"
+            gh issue create --title "$title" --body "$body" --label freshness
           fi
 
       - name: Fail the run so the schedule shows red

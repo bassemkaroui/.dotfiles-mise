@@ -95,7 +95,7 @@ for row in "${rows[@]}"; do
             warn "        at the repos step, before dotfiles/tools/tasks). Fix with one of:"
             warn "          git -C $path status            # see what it is"
             warn "          git -C $path clean -nd         # dry-run; drop -n to delete"
-            warn "          printf '%s\\n' <path> >> $path/.git/info/exclude   # if generated"
+            warn "          printf 'name\\n' >>$path/.git/info/exclude   # if it is generated"
             ((failed++)) || true
             continue
             ;;
@@ -111,11 +111,25 @@ for row in "${rows[@]}"; do
             # configured ref. `mise bootstrap` will fast-forward it — unless the
             # local branch has diverged, in which case the ff fails and takes the
             # whole bootstrap with it (verified: rc=1).
-            if git -C "$path" merge-base --is-ancestor HEAD "origin/${ref:-HEAD}" 2>/dev/null; then
+            # Resolve the ref the way git will, and only after a fetch: without
+            # one the remote-tracking ref is whatever the last fetch left, and
+            # `origin/<ref>` does not exist at all when the ref is a tag or a
+            # SHA — which would report a perfectly healthy pinned repo as
+            # DIVERGED and make this task exit non-zero.
+            git -C "$path" fetch --quiet origin 2>/dev/null || true
+            target_sha=""
+            for candidate in "origin/$ref" "refs/tags/$ref" "$ref"; do
+                target_sha="$(git -C "$path" rev-parse --verify --quiet "$candidate^{commit}" 2>/dev/null || true)"
+                [[ -n "$target_sha" ]] && break
+            done
+            if [[ -z "$target_sha" ]]; then
+                warn "$name — cannot resolve '$ref' locally; \`mise bootstrap\` may fail here"
+                ((failed++)) || true
+            elif git -C "$path" merge-base --is-ancestor HEAD "$target_sha" 2>/dev/null; then
                 info "$name — behind '$ref'; \`mise bootstrap\` will fast-forward it"
             else
                 warn "$name — DIVERGED from '$ref': \`mise bootstrap\` will fail here (no fast-forward)."
-                warn "        Rebase or reset it: git -C $path log --oneline origin/$ref..HEAD"
+                warn "        Inspect: git -C $path log --oneline $target_sha..HEAD"
                 ((failed++)) || true
             fi
             continue

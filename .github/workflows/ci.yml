@@ -274,11 +274,17 @@ jobs:
             # zle", which says nothing about the config. This is plan §2.22\x27s
             # lesson — measure interactivity from a real pty — and CI walked
             # straight into it on its first run.
-            script -qec "zsh -ic exit" /dev/null >/tmp/zsh-smoke.log 2>&1 \
-              || { cat /tmp/zsh-smoke.log; err "interactive zsh failed to start"; }
+            # The TRANSCRIPT goes to a real file, not /dev/null: everything zsh
+            # writes goes to the pty, so sending the typescript to /dev/null
+            # discards the very diagnostic this check exists to surface (the
+            # first version of this step reported a failure with no output).
+            script -qec "zsh -ic exit" /tmp/zsh-typescript.log >/dev/null 2>&1 \
+              || { echo "--- zsh transcript ---"; cat /tmp/zsh-typescript.log; err "interactive zsh failed to start"; }
             # A clean start also means no error output from the rc files.
-            grep -qiE "command not found|parse error|no such file" /tmp/zsh-smoke.log \
-              && { cat /tmp/zsh-smoke.log; err "interactive zsh printed errors on startup"; } || true
+            if grep -qiE "command not found|parse error|no such file" /tmp/zsh-typescript.log; then
+              echo "--- zsh transcript ---"; cat /tmp/zsh-typescript.log
+              err "interactive zsh printed errors on startup"
+            fi
 
             # --- M2: nothing may write into the repo working tree ---
             dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain)"

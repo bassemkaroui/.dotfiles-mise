@@ -89,6 +89,20 @@ if grep -q 'exec zsh -l' "$LOGIN_FILE" 2>/dev/null; then
     exit 0
 fi
 
+# This has to come BEFORE the legacy-migration branch below, not after it.
+# The guard used to sit further down, guarding only the append — while the
+# migration branch did an in-place `sed -i` and an append of its own 29 lines
+# earlier. GNU sed -i writes a new file and renames it over the path, so a
+# symlinked ~/.bash_profile was silently REPLACED BY A REGULAR FILE, detaching
+# it from whatever manages it while leaving the link target untouched.
+# Reproduced with ~/.bash_profile symlinked to a repo file containing the old
+# repo's exact output: mode went 0664 -> regular file, target unchanged.
+if [[ -L "$LOGIN_FILE" ]]; then
+    warn "$LOGIN_FILE is a symlink — refusing to edit it (that would rewrite, or detach, the link target)"
+    warn "Add 'exec zsh' to your login file by hand, or point the account at $ZSH_PATH"
+    exit 0
+fi
+
 # A machine that took this rung under the OLD repo (or under this task before
 # the guard existed) has a bare `exec zsh` line. It does not match the check
 # above, so appending would leave TWO blocks with the unguarded one first —
@@ -123,12 +137,6 @@ fi
 #      the file, it sources ~/.profile first.
 CREATED_LOGIN_FILE=false
 [[ -e "$LOGIN_FILE" ]] || CREATED_LOGIN_FILE=true
-
-if [[ -L "$LOGIN_FILE" ]]; then
-    warn "$LOGIN_FILE is a symlink — refusing to append (it would edit the link target)"
-    warn "Add 'exec zsh' to your login file by hand, or point the account at $ZSH_PATH"
-    exit 0
-fi
 
 {
     printf '\n# Added by mise run setup:login-shell-fallback — the account shell is\n'

@@ -56,7 +56,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 |---|---|
 | *(core, always on)* | runtimes (rust/go/node/zig), core CLI tools, shell configs (zsh + oh-my-zsh + p10k, bash), tmux, git tooling, gpg config, login shell |
 | `graphical` | Ghostty & Obsidian installs + configs, Nerd Font + terminal fonts |
-| `gnome` | GTK/shell themes + GNOME Shell extensions (implies `graphical`) |
+| `gnome` | GNOME Shell extensions + `dconf` (implies `graphical`). The two vendored GTK themes were dropped when this repo went public — install them from upstream |
 | `cosmic` | ddcutil/i2c setup; theme picker via `mise run setup:cosmic-theme` (implies `graphical`) |
 | `ai` | claude + sandbox-runtime |
 | `dev` | uv, corepack, pre-commit, doppler |
@@ -67,7 +67,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `laptop` / `desktop` | device markers consumed by template-mode dotfiles (no standalone config) |
 
 After editing profiles: `mise bootstrap --yes` (add) — removals leave files behind by design;
-run `mise run cleanup` (Phase 5) to reap stale symlinks.
+run `mise run cleanup` to reap stale symlinks.
 
 ## Everyday commands
 
@@ -79,7 +79,8 @@ mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in pl
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise bootstrap repos status      # cloned-repo drift
 mise run cleanup --dry-run       # find symlinks left behind by removed entries
-python3 scripts/lint-config.py   # config collision lint (CI wiring comes in Phase 5)
+mise run repo:lint               # everything CI runs, before you push
+python3 scripts/lint-config.py   # config collision lint (CI runs this via mise run repo:lint)
 python3 scripts/lint-config.py --live   # same, for machine-local ~/.config/mise files
 sandbox/mkhome.sh                # run bootstrap checks against a throwaway $HOME
 ```
@@ -162,6 +163,11 @@ with template mode.
   config files. `scripts/lint-config.py` fails the build otherwise.
 - **Hooks are unconditional.** `$MISE_ENV` does not reach `[bootstrap.hooks]` (verified) —
   profile-gated logic lives in tasks, which do see it.
+- **Config a tool rewrites in place is deployed by `copy`, not `symlink`.**
+  `git config --global` resolves a symlinked `~/.gitconfig` and rewrites the file it
+  points at, so a symlink would let one `git config --global user.email` edit a tracked
+  file in this public repo. Copy mode costs you the write on the next apply — put
+  per-machine git settings in `~/.gitconfig.local`.
 - **Sensitive dirs are never whole-dir symlinks** (`~/.gnupg`, `~/.config/gh`, `~/.claude`,
   `~/.ssh`) so live tokens/keys can't land in the repo tree.
 - **No `[dotfiles]` source may point at something bootstrap creates.** An entry whose explicit

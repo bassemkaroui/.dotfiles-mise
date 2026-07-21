@@ -80,8 +80,20 @@ def main() -> int:
     problems: list[str] = []
     entries = declared_repos()
     if not entries:
-        print("No [bootstrap.repos] entries declared — nothing to check")
-        return 0
+        # NOT `return 0`. This runs monthly and unattended, so "I parsed
+        # nothing" and "there is nothing to check" must not look alike: rename
+        # mise/, restructure the configs, or lose the entries, and the workflow
+        # reports green forever while checking no repository at all. Verified
+        # against a skeleton with an empty mise/: it exited 0.
+        configs = sorted(glob.glob(os.path.join(MISE_DIR, "config*.toml")))
+        print(
+            f"No [bootstrap.repos] entries found in {len(configs)} config file(s) "
+            f"under {MISE_DIR}.\n"
+            "This repo declares several, so this almost certainly means the config "
+            "layout moved and this script no longer knows where to look.",
+            file=sys.stderr,
+        )
+        return 1
 
     for where, url, ref in entries:
         okay, payload = ls_remote(url, args.timeout)

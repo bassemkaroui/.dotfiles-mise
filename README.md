@@ -114,9 +114,16 @@ setup:
 └── home/                      the files those entries point at
 ```
 
-`setup:custom-hookup`, a step in the `[tasks.bootstrap]` chain, links that config file to
-`~/.config/mise/conf.d/50-custom.toml` and applies it. No companion repo, no problem: the
-step warns and the bootstrap carries on.
+`setup:custom-hookup`, a step in the `[tasks.bootstrap]` chain, **clones it if it's missing**
+and links that config file to `~/.config/mise/conf.d/50-custom.toml`. The clone URL comes from
+`$DOTFILES_CUSTOM_MISE_URL`, or is derived from this repo's own `origin` by naming convention
+(`…/.dotfiles-mise.git` → `…/.dotfiles-custom-mise.git`) — so nothing private is committed here
+and you get *your* companion, not the author's. No companion repo, no credentials, no problem:
+the step says so and the bootstrap carries on.
+
+It is a task rather than a `[bootstrap.repos]` entry on purpose: a repos clone that fails
+aborts the entire bootstrap, and a private repo fails to clone on exactly the machines that
+most need the rest of it (CI, a fresh box before its keys exist, anyone else using this repo).
 
 Rules the companion repo must follow — the first is the one that bites:
 

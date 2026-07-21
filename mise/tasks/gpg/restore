@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+#MISE description="Restore a GPG backup archive created by gpg:backup"
+#MISE raw=true
+#USAGE flag "--archive <path>" help="Path to a gpg-backup-*.tar.gpg produced by gpg:backup (default: newest in ~/.gnupg-backups)"
+#USAGE flag "--yes" help="Import without confirming (both prompts)"
+#USAGE flag "--skip-ownertrust" help="Import the keys but leave this machine's ownertrust database alone"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="gpg:restore"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/gpg.sh
+source "$LIB/gpg.sh"
+
+require_gpg
+
+# shellcheck disable=SC2034  # read by confirm() in lib/gpg.sh, which is sourced above
+ASSUME_YES="${usage_yes:-false}"
+SKIP_OWNERTRUST="${usage_skip_ownertrust:-false}"
+ARCHIVE="${usage_archive:-}"
+
+if [[ -z "$ARCHIVE" ]]; then
+    BACKUP_DIR="${GPG_BACKUP_DIR:-$HOME/.gnupg-backups}"
+    # Newest first by filename (our backup names are UTC-stamped YYYYMMDDTHHMMSSZ,
+    # so lexicographic sort == chronological sort — more reliable than fs mtime).
+    mapfile -t candidates < <(
+        find "$BACKUP_DIR" -maxdepth 1 -type f -name 'gpg-backup-*.tar.gpg' 2>/dev/null \
+            | sort -r
+    )
+    if ((${#candidates[@]} == 0)); then
+        fail "No backups found in $BACKUP_DIR — run 'mise run gpg:backup' first, or pass --archive <path>"
+    fi
+    ARCHIVE="${candidates[0]}"
+    info "Auto-selected latest backup: $ARCHIVE"
+fi
+if [[ ! -f "$ARCHIVE" ]]; then
+    fail "Archive not found: $ARCHIVE"
+fi
+
+STAGING="$(mktemp -d)"
+chmod 700 "$STAGING"
+trap 'rm -rf "$STAGING"' EXIT
+
+info "Decrypting $ARCHIVE — you will be prompted for its passphrase"
+gpg --quiet --decrypt "$ARCHIVE" | tar -xf - -C "$STAGING"
+
+if [[ ! -f "$STAGING/secret-keys.asc" ]]; then
+    fail "Archive does not contain secret-keys.asc — is this really a gpg:backup archive?"
+fi
+
+info "Keys in this archive:"
+gpg --show-keys --with-colons --fixed-list-mode "$STAGING/secret-keys.asc" 2>/dev/null \
+    | awk -F: '
+        function flush() {
+            if (fpr != "") {
+                printf "  %s  %s  (expires %s)\n",
+                    substr(fpr, length(fpr) - 15),
+                    (uid == "" ? "(no uid)" : uid),
+                    (expires == "" ? "never" : strftime("%Y-%m-%d", expires))
+            }
+            fpr = ""; uid = ""; expires = ""
+        }
+        $1 == "pub" || $1 == "sec" { flush(); expires = $7 }
+        $1 == "fpr" && fpr == "" { fpr = $10 }
+        $1 == "uid" && uid == "" { uid = $10 }
+        END { flush() }
+    '
+
+confirm "Import these keys into the current keyring?" || {
+    warn "Aborted — no changes made"
+    exit 0
+}
+
+# The imports below are the only mutating step, and one of them is not
+# reversible by re-running anything: --import-ownertrust REPLACES the trust
+# level of every key named in the file. A corrupt or truncated archive can also
+# abort tar/gpg partway through. Archive the whole keyring first — it is a few
+# hundred KB and it is the only way back to the pre-restore state.
+if keyring_backup="$(backup_keyring)"; then
+    [[ -n "$keyring_backup" ]] && ok "Keyring archived first: $keyring_backup"
+else
+    warn "Could not archive ${GNUPGHOME:-~/.gnupg} before importing"
+    confirm "Continue anyway, with no way back?" || {
+        warn "Aborted — no changes made"
+        exit 0
+    }
+fi
+
+gpg --import "$STAGING/secret-keys.asc"
+ok_changed "Imported secret keys from $ARCHIVE"
+
+if [[ -f "$STAGING/public-keys.asc" ]]; then
+    gpg --import "$STAGING/public-keys.asc"
+    ok_changed "Imported public keys"
+fi
+
+if [[ -f "$STAGING/ownertrust.txt" ]]; then
+    if [[ "$SKIP_OWNERTRUST" == "true" ]]; then
+        info "--skip-ownertrust: left this machine's trust database alone"
+    elif confirm "Also import ownertrust? This OVERWRITES the trust level of every key in the archive"; then
+        gpg --import-ownertrust "$STAGING/ownertrust.txt"
+        ok_changed "Imported ownertrust"
+    else
+        info "Skipped ownertrust — keys imported, trust levels unchanged"
+    fi
+fi
+
+ok "Restore complete"

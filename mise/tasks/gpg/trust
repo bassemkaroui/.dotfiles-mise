@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#MISE description="Set ownertrust=ultimate on all own secret keys (idempotent)"
+#MISE raw=true
+#USAGE flag "--yes" help="Apply without confirming"
+#USAGE flag "--dry-run" help="Only report which keys would change"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="gpg:trust"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/gpg.sh
+source "$LIB/gpg.sh"
+
+require_gpg
+
+# The old task mutated the ownertrust database with no prompt and no way to
+# preview. Ultimate trust on your own keys is the right answer often enough
+# that --yes stays easy, but "gpg told me my key is untrusted" is also a
+# symptom of importing the WRONG key, and this task would then bless it.
+# shellcheck disable=SC2034  # read by confirm() in lib/gpg.sh, which is sourced above
+ASSUME_YES="${usage_yes:-false}"
+DRY_RUN="${usage_dry_run:-false}"
+
+mapfile -t primaries < <(primary_fprs)
+if ((${#primaries[@]} == 0)); then
+    warn "No secret keys found — nothing to trust"
+    exit 0
+fi
+
+# Build a map of existing ownertrust levels (fpr -> level).
+declare -A current_trust
+while IFS=: read -r fpr level _; do
+    [[ -z "$fpr" || "$fpr" =~ ^# ]] && continue
+    current_trust["$fpr"]="$level"
+done < <(gpg --export-ownertrust 2>/dev/null)
+
+pending=()
+for fpr in "${primaries[@]}"; do
+    if [[ "${current_trust[$fpr]:-}" == "6" ]]; then
+        ok "$(short_fpr "$fpr") already ultimate"
+    else
+        pending+=("$fpr")
+    fi
+done
+
+if ((${#pending[@]} == 0)); then
+    ok "No ownertrust changes needed"
+    exit 0
+fi
+
+warn "Would set ownertrust=ultimate on ${#pending[@]} key(s):"
+for fpr in "${pending[@]}"; do
+    uid="$(gpg --list-keys --with-colons --fixed-list-mode "$fpr" 2>/dev/null \
+        | awk -F: '$1 == "uid" { print $10; exit }')"
+    printf '    %s  %s  (currently: %s)\n' \
+        "$(short_fpr "$fpr")" "${uid:-(no uid)}" "${current_trust[$fpr]:-unset}"
+done
+
+if [[ "$DRY_RUN" == "true" ]]; then
+    info "--dry-run: nothing changed"
+    exit 0
+fi
+
+confirm "Set these to ultimate?" || {
+    info "Aborted — no changes made"
+    exit 0
+}
+
+for fpr in "${pending[@]}"; do
+    printf '%s:6:\n' "$fpr" | gpg --import-ownertrust 2>/dev/null
+    ok_changed "$(short_fpr "$fpr") set to ultimate"
+done

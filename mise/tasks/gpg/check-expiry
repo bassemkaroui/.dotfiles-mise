@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#MISE description="Show expiry status of your GPG secret keys (warns within 30 days)"
+#MISE raw=true
+#USAGE flag "--strict" help="Exit non-zero when any key is expired or expiring soon (for cron/CI)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="gpg:check-expiry"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/gpg.sh
+source "$LIB/gpg.sh"
+
+require_gpg
+
+# The old task always exited 0, so it could report an expired signing key and
+# still look green to anything that checked its status. --strict makes the
+# verdict machine-readable; the default stays advisory so it can be called
+# from a shell prompt or a login hook without tripping `set -e`.
+STRICT="${usage_strict:-false}"
+
+mapfile -t rows < <(secret_keys_stream)
+if ((${#rows[@]} == 0)); then
+    warn "No secret keys found in keyring"
+    exit 0
+fi
+
+worst_state="ok"
+promote_state() {
+    local s="$1"
+    case "$worst_state:$s" in
+        *:expired) worst_state="expired" ;;
+        ok:warn | none:warn) worst_state="warn" ;;
+    esac
+}
+
+print_expiry_header 0
+for row in "${rows[@]}"; do
+    print_expiry_row "$row" 0
+    epoch="$(printf '%s' "$row" | awk -F"$GPG_FS" '{print $5}')"
+    days="$(days_remaining "$epoch")"
+    promote_state "$(expiry_state "$days")"
+done
+
+case "$worst_state" in
+    expired)
+        warn "One or more keys have expired — run: mise run gpg:extend-expiry"
+        [[ "$STRICT" == "true" ]] && exit 1
+        ;;
+    warn)
+        warn "One or more keys expire within ${GPG_EXPIRY_WARN_DAYS} days — run: mise run gpg:extend-expiry"
+        [[ "$STRICT" == "true" ]] && exit 1
+        ;;
+    *) ok "All secret keys are valid beyond ${GPG_EXPIRY_WARN_DAYS} days" ;;
+esac
+exit 0

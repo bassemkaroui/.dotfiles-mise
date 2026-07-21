@@ -107,6 +107,15 @@ obsidian_install_appimage() {
         skip "Failed to download the Obsidian AppImage from $url"
     fi
     chmod +x "$tmp"
+    # Prove the download is an AppImage before recording it as the installed
+    # version. It used to be moved into place and stamped unconditionally, so a
+    # truncated or HTML-error download was remembered as "$version" forever:
+    # obsidian_installed_version then reported it and both install:obsidian and
+    # update:obsidian said "up to date" and never retried.
+    if ! head -c 4 "$tmp" | grep -q $'\x7fELF'; then
+        rm -f "$tmp"
+        skip "The downloaded Obsidian AppImage is not an executable (truncated or an error page?)"
+    fi
     mv "$tmp" "$OBSIDIAN_BIN"
     printf '%s\n' "$version" >"$OBSIDIAN_VERSION_FILE"
     ok_changed "Obsidian $version installed to $OBSIDIAN_BIN"

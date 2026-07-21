@@ -30,7 +30,13 @@ else
 
     # Nerd Fonts release zips are on GitHub; gh_curl attaches a token when one
     # is around so a rate-limited machine still gets its font.
+    # --connect-timeout/--max-time: this is the only network call in the
+    # [tasks.bootstrap] chain, and without them a blackholed (DROP, not REJECT)
+    # network stalls at the kernel default per attempt — four times over, with
+    # --retry 3 — while a stalled mid-transfer read never times out at all. An
+    # unattended `mise bootstrap` would hang here indefinitely.
     if gh_curl -fSL --retry 3 --retry-delay 2 --retry-all-errors \
+        --connect-timeout 10 --max-time 300 \
         -o "$tmp/FiraCode.zip" \
         "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/FiraCode.zip"; then
         # Extraction is guarded as carefully as the download: curl -f can
@@ -60,7 +66,13 @@ PY
         fi
         [[ "$extracted" == true ]] \
             || skip "The downloaded FiraCode archive could not be extracted — re-run: mise run setup:fonts"
-        have fc-cache && fc-cache -f "$FONT_DIR" >/dev/null 2>&1
+        # `|| true`: the last command of an && list is NOT exempt from set -e,
+        # so a non-zero fc-cache (unwritable ~/.cache/fontconfig, corrupt cache)
+        # exited this task and aborted every later step of [tasks.bootstrap] —
+        # install:ghostty, install:obsidian, install:veracrypt,
+        # install:gnome-extensions, setup:cosmic. The font is already installed
+        # at this point; a stale cache is not worth the machine.
+        have fc-cache && fc-cache -f "$FONT_DIR" >/dev/null 2>&1 || true
         ok_changed "FiraCode Nerd Font installed to $FONT_DIR"
     else
         # Network failures must not abort the bootstrap chain (see lib/profile.sh).
@@ -119,7 +131,12 @@ if have alacritty; then
         if [[ "$current" == "$NERD_FONT" ]]; then
             ok "Alacritty already using ${NERD_FONT}"
         else
-            sed -i "s/family = .*/family = \"${NERD_FONT}\"/" "$cfg"
+            # Anchored to the FIRST match only: alacritty.toml has a
+            # `family = ` line per style ([font.normal], [font.bold],
+            # [font.italic], [font.bold_italic]), and the unanchored form
+            # rewrote all of them, silently discarding the user's per-style
+            # faces.
+            sed -i "0,/^[[:space:]]*family = .*/s//family = \"${NERD_FONT}\"/" "$cfg"
             ok_changed "Set font in Alacritty config"
         fi
     else
@@ -137,7 +154,7 @@ if have kitty; then
         if [[ "$current" == "$NERD_FONT" ]]; then
             ok "Kitty already using ${NERD_FONT}"
         else
-            sed -i "s/^font_family .*/font_family ${NERD_FONT}/" "$cfg"
+            sed -i "0,/^font_family .*/s//font_family ${NERD_FONT}/" "$cfg"
             ok_changed "Set font in Kitty config"
         fi
     else

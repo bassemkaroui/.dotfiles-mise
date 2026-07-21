@@ -66,12 +66,30 @@ if not raw:
     sys.exit(0)
 try:
     data = json.loads(raw)
-except json.JSONDecodeError:
-    sys.exit(0)
-for r in data.get("repos", []):
+except json.JSONDecodeError as e:
+    # exit 3, NOT 0. Exiting 0 here produced an empty row set, which the caller
+    # reports as "No [bootstrap.repos] entries declared" — the exact
+    # all-clear the empty-payload guard above exists to prevent. Any change to
+    # the --json shape of mise would have silenced this task permanently.
+    print("could not parse `mise bootstrap repos status --json`: %s" % e, file=sys.stderr)
+    sys.exit(3)
+repos = data.get("repos")
+if repos is None:
+    print("`repos` key missing from `mise bootstrap repos status --json`", file=sys.stderr)
+    sys.exit(3)
+for r in repos:
     print("\x1f".join([r.get("path") or "", r.get("ref") or "", r.get("state") or ""]))
 '
 )
+# `mapfile < <(...)` hides the child's status, so ask for it explicitly: a
+# parse failure (exit 3) must not look like "nothing declared".
+if ! printf '%s' "$status_json" | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+sys.exit(0 if not raw else (0 if isinstance(json.loads(raw).get("repos"), list) else 3))
+' 2>/dev/null; then
+    fail "Could not read \`mise bootstrap repos status --json\` — refusing to report all-clear"
+fi
 ((${#rows[@]} > 0)) || {
     ok "No [bootstrap.repos] entries declared"
     exit 0
@@ -157,7 +175,19 @@ for row in "${rows[@]}"; do
         ((failed++)) || true
         continue
     fi
-    after="$(git -C "$path" rev-parse "origin/$branch")"
+    # Guarded: the branch check above deliberately falls through when
+    # refs/remotes/origin/$branch does not exist locally but ls-remote finds it
+    # on the server, and `git fetch origin <branch>` only creates the
+    # remote-tracking ref when remote.origin.fetch is a wildcard refspec. In a
+    # --single-branch clone checked out on another branch it is not, so this
+    # rev-parse failed with "ambiguous argument", exited 128 under set -e, and
+    # took the rest of the loop and the summary with it.
+    if ! after="$(git -C "$path" rev-parse --verify --quiet "origin/$branch" 2>/dev/null)"; then
+        warn "$name — fetched, but origin/$branch is not tracked locally (single-branch clone?)"
+        warn "    fix with: git -C $path remote set-branches --add origin $branch && git -C $path fetch origin"
+        ((failed++)) || true
+        continue
+    fi
 
     if [[ "$before" == "$after" ]]; then
         ok "$name — already current on $branch (${before:0:7})"

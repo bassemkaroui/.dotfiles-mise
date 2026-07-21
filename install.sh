@@ -35,13 +35,13 @@ die() {
 # mise/config.toml's self-management entries name ~/.dotfiles-mise and
 # ~/.config/mise literally. Fail loudly here rather than let mise degrade a
 # non-matching source glob into a warning and "succeed" with nothing linked.
-[[ "$(readlink -f "$REPO")" == "$(readlink -f "$HOME/.dotfiles-mise")" ]] ||
-    die "This repo must live at ~/.dotfiles-mise (found: $REPO).
+[[ "$(readlink -f "$REPO")" == "$(readlink -f "$HOME/.dotfiles-mise")" ]] \
+    || die "This repo must live at ~/.dotfiles-mise (found: $REPO).
       The [dotfiles] entries in mise/config.toml hardcode that path.
       Move the clone, or edit those entries and dotfiles.root to match."
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
-[[ "$CONF" == "$HOME/.config/mise" ]] ||
-    die "XDG_CONFIG_HOME points mise config at $CONF, but mise/config.toml
+[[ "$CONF" == "$HOME/.config/mise" ]] \
+    || die "XDG_CONFIG_HOME points mise config at $CONF, but mise/config.toml
       targets ~/.config/mise literally. Unset XDG_CONFIG_HOME or edit those entries."
 
 # ── 1. mise itself ────────────────────────────────────────────────────────────
@@ -123,8 +123,8 @@ rescue_machine_local() {
             [[ -f "$f" && ! -e "$CONF/conf.d/$(basename "$f")" ]] || continue
             mv "$f" "$CONF/conf.d/" && ok "Rescued machine-local conf.d/$(basename "$f") out of $src"
         done
-        rmdir "$src/conf.d" 2>/dev/null ||
-            warn "$src/conf.d still has files — left in place, move them to $CONF/conf.d/ by hand"
+        rmdir "$src/conf.d" 2>/dev/null \
+            || warn "$src/conf.d still has files — left in place, move them to $CONF/conf.d/ by hand"
     fi
     shopt -u nullglob
 }
@@ -312,8 +312,8 @@ guard_old_repo() {
         done
     done < <(
         # [dotfiles] targets …
-        { mise dotfiles status --json 2>/dev/null || true; } |
-            python3 -c '
+        { mise dotfiles status --json 2>/dev/null || true; } \
+            | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()
 if not raw:
@@ -329,8 +329,8 @@ for f in data.get("files", []):
         # bootstrap step than dotfiles. ~/.tmux is a stow symlink into the old
         # repo's oh-my-tmux submodule on a machine that hasn't unstowed yet, so
         # a repos apply would run git inside that submodule's working tree.
-        { mise bootstrap repos status --json 2>/dev/null || true; } |
-            python3 -c '
+        { mise bootstrap repos status --json 2>/dev/null || true; } \
+            | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()
 if not raw:
@@ -376,8 +376,8 @@ backup_conflicts() {
     command -v python3 &>/dev/null || return 0
     # `|| true`: a status failure must not kill the script via pipefail — the
     # backup pass is best-effort, and bootstrap below reports the real problem.
-    { mise dotfiles status --json 2>/dev/null || true; } |
-        python3 -c '
+    { mise dotfiles status --json 2>/dev/null || true; } \
+        | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()
 if not raw:
@@ -395,8 +395,8 @@ for f in data.get("files", []):
     # refuses. Backing up every differing target is the only defence.
     if f.get("state") == "differs":
         print(f["target"])
-' |
-        while IFS= read -r target; do
+' \
+        | while IFS= read -r target; do
             expanded="${target/#\~/$HOME}"
             [[ -e "$expanded" && ! -L "$expanded" ]] || continue
             bak="$expanded.pre-mise.bak"

@@ -192,6 +192,11 @@ print_expiry_row() {
 #
 # Echoes the backup path on success; returns non-zero (with a warning) if the
 # keyring could not be archived.
+# It is deliberately NOT encrypted, unlike gpg:backup's output: this is a
+# same-disk copy of a directory that already sits there unencrypted, taken
+# mid-restore, and needing a passphrase to roll back a failed restore is how
+# people lose keyrings. It is created 0600 (the directory it copies is 0700)
+# and the old ones are pruned below so they do not accumulate forever.
 backup_keyring() {
     local home_dir out
     home_dir="${GNUPGHOME:-$HOME/.gnupg}"
@@ -199,13 +204,47 @@ backup_keyring() {
         return 0 # nothing to lose yet
     fi
     out="${home_dir%/}.pre-restore-$(date -u +%Y%m%dT%H%M%SZ).tar"
+    # Create it 0600 BEFORE tar writes a byte: `tar` then `chmod` leaves the
+    # whole keyring readable at the process umask for the duration of the write.
+    (umask 077 && : >"$out") 2>/dev/null || return 1
     if tar -cf "$out" -C "$(dirname "$home_dir")" "$(basename "$home_dir")" 2>/dev/null; then
         chmod 600 "$out"
+        # Keep the three most recent; every restore makes one and nothing else
+        # ever removed them.
+        local old
+        while IFS= read -r old; do
+            rm -f "$old"
+        done < <(find "$(dirname "$home_dir")" -maxdepth 1 -type f \
+            -name "$(basename "${home_dir%/}").pre-restore-*.tar" 2>/dev/null \
+            | sort -r | tail -n +4)
         printf '%s' "$out"
         return 0
     fi
     rm -f "$out"
     return 1
+}
+
+# confirm_critical <prompt> — like confirm(), but --yes does NOT answer it.
+#
+# The distinction matters exactly once: when the pre-import keyring archive
+# FAILED and the next step is --import-ownertrust, which overwrites the trust
+# level of every key in the archive and cannot be undone without that backup.
+# `--yes` is documented, and understood, as "skip the confirmations"; letting
+# it also wave through "there is no way back from here" turns a full disk into
+# silent, unrecoverable trust loss. That one needs its own opt-in.
+confirm_critical() {
+    if [[ "${FORCE_NO_BACKUP:-false}" == "true" ]]; then
+        warn "--force-no-backup given: proceeding with no way back"
+        return 0
+    fi
+    if [[ ! -t 0 ]]; then
+        warn "No terminal to confirm at, and --force-no-backup was not given — declining: $1"
+        return 1
+    fi
+    local reply
+    printf '%s (y/N): ' "$1"
+    read -r reply || reply=""
+    [[ "$reply" =~ ^[Yy]$ ]]
 }
 
 # confirm <prompt> — true when the user agrees. Honours --yes via $ASSUME_YES,

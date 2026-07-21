@@ -44,7 +44,13 @@ chmod 700 "$BACKUP_DIR"
 
 STAGING="$(mktemp -d)"
 chmod 700 "$STAGING"
-trap 'rm -rf "$STAGING"' EXIT
+# $OUT is in the trap too. Without it, an interrupted or failed encryption left
+# a truncated archive behind — at the process umask, because the chmod 600
+# below never ran — carrying the NEWEST timestamp. gpg:restore auto-selects the
+# newest archive and never falls back, so the wreck would have been preferred
+# over the last good backup.
+OUT_PARTIAL="$OUT.partial.$$"
+trap 'rm -rf "$STAGING"; rm -f "$OUT_PARTIAL"' EXIT
 
 info "Exporting ${#primaries[@]} secret primary key(s) — gpg-agent may prompt for your PRIMARY-key passphrase"
 gpg --quiet --armor --export-secret-keys "${primaries[@]}" >"$STAGING/secret-keys.asc"
@@ -67,7 +73,9 @@ with 'gpg --gen-revoke <fpr>' and store them somewhere safe and distinct.
 EOF
 
 info "Encrypting tarball with AES256 — pick a FRESH passphrase for this backup (not your primary-key passphrase)"
-tar -cf - -C "$STAGING" . | gpg --symmetric --cipher-algo AES256 -o "$OUT"
-chmod 600 "$OUT"
+(umask 077 && tar -cf - -C "$STAGING" . | gpg --symmetric --cipher-algo AES256 -o "$OUT_PARTIAL")
+chmod 600 "$OUT_PARTIAL"
+# Only a complete, encrypted archive gets the real name.
+mv -f "$OUT_PARTIAL" "$OUT"
 
 ok_changed "Backup written: $OUT"

@@ -65,6 +65,10 @@ jq = "latest"
 "apt:unzip" = "latest"
 # pipx: backend needs a venv-capable python
 "apt:python3-venv" = "latest"
+# gpg: ~/.gnupg/gpg-agent.conf is a [dotfiles] entry, setup:git-signing looks
+# for the signing key, and the whole gpg:* task suite needs it. Desktop Ubuntu
+# ships it; a container or a minimal server image does not.
+"apt:gnupg" = "latest"
 # interactive apt frontend (user preference; automation never depends on it)
 "apt:nala" = "latest"
 

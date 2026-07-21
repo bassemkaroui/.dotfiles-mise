@@ -35,6 +35,13 @@ delta = "latest"
 tlrc = "latest"
 gh = "latest"
 "aqua:dlvhdr/gh-dash" = "latest"
+# urlscan is installed through mise's pipx backend, which "will actually
+# default to using uvx … if uv is installed" (dev-tools/backends/pipx) — so uv,
+# not pipx, is what this entry needs, and mise installs it first. Verified in a
+# container with NEITHER pipx NOR python3 present: uv alone installed urlscan.
+# uv was in the `dev` profile until 2026-07-21; it is core now because a core
+# tool depends on it.
+uv = "latest"
 "pipx:urlscan" = "latest"
 resvg = "latest"
 "github:aristocratos/btop" = "latest"
@@ -63,12 +70,9 @@ jq = "latest"
 "apt:pkg-config" = "latest"
 # font/archive handling in tasks
 "apt:unzip" = "latest"
-# pipx: the `pipx:urlscan` tool above is installed by shelling out to pipx, so
-# the binary has to exist BEFORE [tools] runs — packages are step 1, tools are
-# step 9. Nothing provided it until CI's first end-to-end run failed with
-# `pipx install urlscan…: No such file or directory`. python3-venv is what pipx
-# itself needs to build the isolated environment.
-"apt:pipx" = "latest"
+# python3-venv backs the pipx backend's FALLBACK path (real pipx, used only if
+# uv is somehow unavailable); uv is a core [tools] entry, so that path should
+# never be taken. python3 itself is a hard requirement of install.sh.
 "apt:python3-venv" = "latest"
 # gpg: ~/.gnupg/gpg-agent.conf is a [dotfiles] entry, setup:git-signing looks
 # for the signing key, and the whole gpg:* task suite needs it. Desktop Ubuntu

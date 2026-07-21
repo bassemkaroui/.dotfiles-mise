@@ -56,8 +56,22 @@ ok "Latest Ghostty release: $LATEST"
 
 # ─── Already installed? ───────────────────────────────────────────────────────
 
-if have ghostty; then
-    CURRENT="$(ghostty --version 2>&1 | head -1 | sed -E 's/[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+# Resolve ghostty by absolute path FIRST, then PATH. ~/.local/bin is added to
+# PATH by .zprofile, but not necessarily in THIS process — the note 130 lines
+# down says so, and only fixes PATH *after* installing. So a `mise bootstrap`
+# from a plain bash/CI shell saw no ghostty, skipped the up-to-date check and
+# the --update gate, and re-downloaded + replaced the binary on EVERY run,
+# defeating the "never swap a running terminal's binary" rule at the top of
+# this file. lib/obsidian.sh gets this right with an absolute -x test.
+GHOSTTY_BIN=""
+if [[ -x "$HOME/.local/bin/ghostty" ]]; then
+    GHOSTTY_BIN="$HOME/.local/bin/ghostty"
+elif have ghostty; then
+    GHOSTTY_BIN="$(command -v ghostty)"
+fi
+
+if [[ -n "$GHOSTTY_BIN" ]]; then
+    CURRENT="$("$GHOSTTY_BIN" --version 2>&1 | head -1 | sed -E 's/[^0-9]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)"
     if [[ "$CURRENT" == "$LATEST" ]]; then
         ok "Ghostty is up to date ($CURRENT)"
         exit 0
@@ -174,7 +188,12 @@ else
     trap 'rm -rf "$build"' EXIT
     curl -fSL -o "$build/$tarball" "https://release.files.ghostty.org/${LATEST}/${tarball}" \
         || skip "Could not download the Ghostty source tarball"
-    tar xzf "$build/$tarball" -C "$build"
+    # `|| skip`, like every other step here: nothing verifies the tarball's
+    # integrity (curl -f catches a bad response, not a truncated-but-200 body),
+    # and an unguarded failure exits non-zero, aborting every later step of
+    # [tasks.bootstrap].
+    tar xzf "$build/$tarball" -C "$build" \
+        || skip "Could not unpack the Ghostty source tarball (truncated download?)"
 
     flags=(-p "$HOME/.local" -Doptimize=ReleaseFast)
     [[ "$layer_shell" == false ]] && flags+=(-fno-sys=gtk4-layer-shell)

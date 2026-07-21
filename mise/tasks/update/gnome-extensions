@@ -49,8 +49,25 @@ ok "Writing to $(dirname "$MANIFEST_REAL")/"
 old_manifest=""
 [[ -f "$MANIFEST_REAL" ]] && old_manifest="$(<"$MANIFEST_REAL")"
 
-gnome-extensions list --user | sort >"$MANIFEST_REAL"
-new_manifest="$(<"$MANIFEST_REAL")"
+# Capture into a variable FIRST, and refuse an empty result.
+#
+# `>"$MANIFEST_REAL"` truncates before the command runs, so an empty listing
+# wiped the manifest — and the commit step below then committed the wipe with
+# no confirmation. An empty listing is not a rare accident: it is what
+# `gnome-extensions list --user` prints with no live GNOME session, or when the
+# extensions are installed system-wide. The old repo guarded this with a
+# $DISPLAY/$WAYLAND_DISPLAY/$XDG_SESSION_TYPE check; the port replaced that with
+# `require_profile gnome` plus `have gnome-shell`, neither of which implies a
+# session is actually running.
+captured="$(gnome-extensions list --user | sort || true)"
+if [[ -z "$captured" ]]; then
+    warn "\`gnome-extensions list --user\` returned nothing."
+    warn "That is what a missing GNOME session looks like (or extensions installed system-wide),"
+    warn "and writing it would blank $MANIFEST_REAL and commit the blanking."
+    skip "Run this from a GNOME session; nothing was changed"
+fi
+printf '%s\n' "$captured" >"$MANIFEST_REAL"
+new_manifest="$captured"
 
 if [[ "$old_manifest" == "$new_manifest" ]]; then
     ok "manifest.txt unchanged"

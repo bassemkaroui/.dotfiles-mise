@@ -2,7 +2,8 @@
 #MISE description="Restore a GPG backup archive created by gpg:backup"
 #MISE raw=true
 #USAGE flag "--archive <path>" help="Path to a gpg-backup-*.tar.gpg produced by gpg:backup (default: newest in ~/.gnupg-backups)"
-#USAGE flag "--yes" help="Import without confirming (both prompts)"
+#USAGE flag "--yes" help="Import without confirming (the ownertrust prompt)"
+#USAGE flag "--force-no-backup" help="Proceed even if the pre-import keyring archive fails (NOT implied by --yes)"
 #USAGE flag "--skip-ownertrust" help="Import the keys but leave this machine's ownertrust database alone"
 set -eo pipefail
 
@@ -18,6 +19,8 @@ require_gpg
 
 # shellcheck disable=SC2034  # read by confirm() in lib/gpg.sh, which is sourced above
 ASSUME_YES="${usage_yes:-false}"
+# shellcheck disable=SC2034  # read by confirm_critical() in lib/gpg.sh
+FORCE_NO_BACKUP="${usage_force_no_backup:-false}"
 SKIP_OWNERTRUST="${usage_skip_ownertrust:-false}"
 ARCHIVE="${usage_archive:-}"
 
@@ -82,7 +85,9 @@ if keyring_backup="$(backup_keyring)"; then
     [[ -n "$keyring_backup" ]] && ok "Keyring archived first: $keyring_backup"
 else
     warn "Could not archive ${GNUPGHOME:-~/.gnupg} before importing"
-    confirm "Continue anyway, with no way back?" || {
+    # confirm_critical, NOT confirm: --yes must not answer this one. With the
+    # archive gone, --import-ownertrust below is irreversible.
+    confirm_critical "Continue anyway, with no way back?" || {
         warn "Aborted — no changes made"
         exit 0
     }

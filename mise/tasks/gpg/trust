@@ -3,6 +3,7 @@
 #MISE raw=true
 #USAGE flag "--yes" help="Apply without confirming"
 #USAGE flag "--dry-run" help="Only report which keys would change"
+#USAGE flag "--force-no-backup" help="Apply even if the pre-write keyring archive fails (NOT implied by --yes)"
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
@@ -22,6 +23,8 @@ require_gpg
 # shellcheck disable=SC2034  # read by confirm() in lib/gpg.sh, which is sourced above
 ASSUME_YES="${usage_yes:-false}"
 DRY_RUN="${usage_dry_run:-false}"
+# shellcheck disable=SC2034  # read by confirm_critical() in lib/gpg.sh
+FORCE_NO_BACKUP="${usage_force_no_backup:-false}"
 
 mapfile -t primaries < <(primary_fprs)
 if ((${#primaries[@]} == 0)); then
@@ -67,6 +70,21 @@ confirm "Set these to ultimate?" || {
     info "Aborted — no changes made"
     exit 0
 }
+
+# lib/gpg.sh states the invariant: "Anything that imports into the keyring gets
+# one of these first." This task writes the trust database with
+# --import-ownertrust below and had no archive at all, so gpg:restore was its
+# only caller. Overwriting trust is not reversible by re-running anything —
+# the previous levels exist nowhere else once they are gone.
+if keyring_backup="$(backup_keyring)"; then
+    [[ -n "$keyring_backup" ]] && ok "Keyring archived first: $keyring_backup"
+else
+    warn "Could not archive ${GNUPGHOME:-~/.gnupg} before writing ownertrust"
+    confirm_critical "Continue anyway, with no way back?" || {
+        warn "Aborted — no changes made"
+        exit 0
+    }
+fi
 
 for fpr in "${pending[@]}"; do
     printf '%s:6:\n' "$fpr" | gpg --import-ownertrust 2>/dev/null

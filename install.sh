@@ -300,6 +300,14 @@ if [[ -f "$CUSTOM_CONF" ]]; then
         ok "Linked the companion repo: $DROPIN -> $CUSTOM_CONF"
     fi
 
+    # ONLY on the run that creates the link. A template-mode target is a real
+    # file once rendered, so an unconditional pass re-archives ~/.ssh/config on
+    # every single run — CI's idempotency check caught exactly that
+    # (`config.pre-mise.bak1` appearing on run 2). Afterwards, drift is
+    # backup_conflicts' job, and it keys on `state: differs`, which a
+    # freshly-rendered file does not have. Same reasoning as the task's
+    # FIRST_LINK gate.
+    #
     # Back up what the companion is about to deploy, keyed on its config file
     # rather than on `mise dotfiles status`. The status view of a just-created
     # drop-in proved unreliable — observed in repeated sandbox runs of
@@ -308,16 +316,18 @@ if [[ -f "$CUSTOM_CONF" ]]; then
     # template-mode ~/.ssh/config, which overwrites a real file with no error
     # and no backup (§2.26). backup_conflicts further down still runs, and
     # still covers drift on later runs.
-    while IFS= read -r target; do
-        [[ -n "$target" ]] || continue
-        expanded="${target/#\~/$HOME}"
-        [[ -e "$expanded" && ! -L "$expanded" ]] || continue
-        bak="$expanded.pre-mise.bak"
-        n=1
-        while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
-        warn "Backing up $target -> $bak (declared by the companion repo)"
-        mv "$expanded" "$bak" || warn "Could not move $expanded aside"
-    done < <(python3 "$REPO/scripts/dotfiles-targets.py" "$CUSTOM_CONF" || true)
+    if [[ -n "${LINKED_DROPIN:-}" ]]; then
+        while IFS= read -r target; do
+            [[ -n "$target" ]] || continue
+            expanded="${target/#\~/$HOME}"
+            [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+            bak="$expanded.pre-mise.bak"
+            n=1
+            while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+            warn "Backing up $target -> $bak (declared by the companion repo)"
+            mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+        done < <(python3 "$REPO/scripts/dotfiles-targets.py" "$CUSTOM_CONF" || true)
+    fi
 fi
 
 # ── 5. Validate config before handing over to mise ────────────────────────────

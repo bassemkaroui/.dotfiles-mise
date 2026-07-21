@@ -3,12 +3,19 @@
 # touching the real home directory or writing anything into the repo.
 #
 # Usage:
-#   sandbox/mkhome.sh [--keep] [--profiles "graphical,ai,dev"] [--] [mise args...]
+#   sandbox/mkhome.sh [--keep] [--two-pass] [--profiles "graphical,ai,dev"] [--] [mise args...]
 #
 # Default action is `mise bootstrap status`; pass extra args to run something
 # else, e.g.:
 #   sandbox/mkhome.sh -- dotfiles apply --dry-run
 #   sandbox/mkhome.sh --profiles graphical,gnome -- bootstrap --only dotfiles --dry-run
+#   sandbox/mkhome.sh --two-pass --profiles gnome -- dotfiles status
+#
+# --two-pass mirrors install.sh's real first run: link the config family with
+# `bootstrap --only dotfiles` under MISE_GLOBAL_CONFIG_FILE, then drop the
+# variable. WITHOUT it the sandbox can only ever see CORE entries — the
+# variable suppresses config.<profile>.toml (§2.12), so a profile-specific
+# assertion made in single-pass mode silently passes for the wrong reason.
 #
 # The sandbox mirrors the real first-run flow: ~/.config/mise is a real
 # directory holding a machine-local miserc.toml, and mise is pointed at the
@@ -19,11 +26,16 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILES="${PROFILES:-}"
 KEEP=0
+TWO_PASS=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --keep)
             KEEP=1
+            shift
+            ;;
+        --two-pass)
+            TWO_PASS=1
             shift
             ;;
         --profiles)
@@ -84,7 +96,13 @@ export MISE_GLOBAL_CONFIG_FILE="$REPO/mise/config.toml"
 cd "$HOME"
 mise trust "$REPO/mise/config.toml" >/dev/null 2>&1 || true
 
-echo "── sandbox HOME: $HOME (keep=$KEEP, profiles=${PROFILES:-none}) ──" >&2
+echo "── sandbox HOME: $HOME (keep=$KEEP, two-pass=$TWO_PASS, profiles=${PROFILES:-none}) ──" >&2
+
+if [[ $TWO_PASS -eq 1 ]]; then
+    mise bootstrap --only dotfiles --yes >/dev/null
+    unset MISE_GLOBAL_CONFIG_FILE
+    mise trust "$XDG_CONFIG_HOME/mise/config.toml" >/dev/null 2>&1 || true
+fi
 if [[ $# -gt 0 ]]; then
     mise "$@"
 else

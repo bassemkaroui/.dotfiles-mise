@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Wire up the private custom repo (per-user config that must stay out of this one)"
+#MISE description="Wire up the private companion repo (per-user config that must stay out of this one)"
 #MISE raw=true
 set -eo pipefail
 
@@ -8,27 +8,31 @@ TASK_NAME="setup:custom-hookup"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# D12. Some configuration must not live in this repo: git identity and signing
-# key, ssh host configs, per-device p10k output. In the old repo that was
-# ~/.dotfiles-custom + `mise run setup:custom-dotfiles` (stow packages with
-# tag-* dirs). The v2 shape is a machine-local drop-in: the custom repo owns
-# ~/.config/mise/conf.d/50-custom.toml, which mise loads alongside this config
-# and which may declare its own [dotfiles]/[tools] — as long as it never
-# redeclares a key this repo owns (see MIGRATION.md; conf.d files are checked
-# by `scripts/lint-config.py --live`).
+# D12 / §7.7. Some configuration must not live in this repo: git identity, ssh
+# host names and ports, the GNOME extension manifest. In the old repo that was
+# ~/.dotfiles-custom + `setup:custom-dotfiles` (stow packages, tag-* dirs and an
+# INI tracker). The v2 companion is DATA, not a program — no installer, no
+# tasks, no bootstrap logic:
 #
-# This step is the slot in the chain, deliberately thin: the full contract and
-# the adapted custom repo land in Phase 6. It runs before setup:git-signing,
-# which needs the file the custom repo deploys.
+#   ~/.dotfiles-custom-mise/
+#   ├── mise/config.custom.toml   [dotfiles] entries, explicit absolute sources
+#   ├── home/                     the private files those entries point at
+#   └── templates/                *.tmpl for template-mode entries
 #
-# Contract requirement (Phase 6 must honour it): install.sh has to APPLY the
-# custom repo's dotfiles before returning, not merely drop a conf.d file in
-# place. [tasks.bootstrap] runs at bootstrap step 12, long after the dotfiles
-# step (4) — so a drop-in registered here would not be applied until the *next*
-# bootstrap, and setup:git-signing (the very next step) would find no
-# ~/.gitconfig.local.example and no-op on every fresh machine.
+# All this task does is symlink that one config file into
+# ~/.config/mise/conf.d/50-custom.toml — where mise loads it alongside the main
+# config, with no trust prompt (verified) — and apply it. The contract the
+# companion must honour is in CUSTOM.md.
+#
+# install.sh creates the same link earlier, before its guard/backup/lint block,
+# for machines where the clone already exists. This task is the other entry
+# path: the fresh machine, where the companion is cloned right here, at
+# bootstrap step 12 — long after install.sh finished. That is why every safety
+# check install.sh performs has to exist here too (see backup_differing below).
 
 CUSTOM_DIR="${DOTFILES_CUSTOM_MISE_DIR:-$HOME/.dotfiles-custom-mise}"
+DROPIN="$CONF/conf.d/50-custom.toml"
+SOURCE_CONF="$CUSTOM_DIR/mise/config.custom.toml"
 
 # ─── Clone it, so a fresh machine needs no manual git clone ───────────────────
 #
@@ -72,14 +76,22 @@ if [[ ! -d "$CUSTOM_DIR" ]]; then
         exit 0
     fi
     info "Cloning the companion repo: $url"
+    # Clone to a temp path and move on success. A clone that dies mid-transfer
+    # (auth failure, dropped network) leaves a NON-EMPTY directory, which the
+    # `-d` test above would then read as "already cloned" forever — and hooking
+    # up a half-clone means a config file whose sources are missing, which
+    # aborts every dotfiles apply on the machine (§2.16).
+    tmp_clone="$CUSTOM_DIR.cloning.$$"
+    rm -rf "$tmp_clone"
     # GIT_TERMINAL_PROMPT=0: without credentials git would otherwise sit waiting
     # for a username that an unattended bootstrap will never type.
-    if GIT_TERMINAL_PROMPT=0 git clone --quiet "$url" "$CUSTOM_DIR" 2>/dev/null; then
+    if GIT_TERMINAL_PROMPT=0 git clone --quiet "$url" "$tmp_clone" 2>/dev/null; then
+        mv "$tmp_clone" "$CUSTOM_DIR"
         ok_changed "Cloned $url → $CUSTOM_DIR"
     else
         # Entirely normal: no companion repo exists, or this machine has no
         # credentials for it yet. Never fatal.
-        rmdir "$CUSTOM_DIR" 2>/dev/null || true
+        rm -rf "$tmp_clone"
         info "Could not clone $url — continuing without a companion repo"
         info "(set up your git credentials, then: mise run setup:custom-hookup)"
         exit 0
@@ -87,25 +99,95 @@ if [[ ! -d "$CUSTOM_DIR" ]]; then
 fi
 
 # ─── Hook it up ───────────────────────────────────────────────────────────────
-# PHASE 6 REWRITES EVERYTHING BELOW. The companion repo is data, not a program
-# (§7.7): this task will symlink its mise/config.custom.toml to
-# ~/.config/mise/conf.d/50-custom.toml and apply it, rather than executing an
-# install.sh the companion has to carry. Until that lands, the old contract is
-# honoured for machines that already follow it.
 
-if [[ ! -x "$CUSTOM_DIR/install.sh" ]]; then
-    warn "$CUSTOM_DIR has no executable install.sh — nothing to run yet"
-    warn "(the data-only contract lands in Phase 6; see MIGRATION.md)"
+if [[ ! -f "$SOURCE_CONF" ]]; then
+    warn "$CUSTOM_DIR has no mise/config.custom.toml — nothing to hook up"
+    warn "(the companion repo is data + one config file; see CUSTOM.md)"
     exit 0
 fi
 
-info "Running $CUSTOM_DIR/install.sh"
-# Third-party code in the middle of the chain: a non-zero exit would take every
-# later step down with it and fail the whole bootstrap (§2.21). Every other step
-# degrades to a warning; this one must too.
-if "$CUSTOM_DIR/install.sh"; then
-    ok "Custom repo hookup complete"
+mkdir -p "$CONF/conf.d"
+
+if [[ -e "$DROPIN" && ! -L "$DROPIN" ]]; then
+    warn "$DROPIN exists and is a real file, not our symlink — leaving it alone"
+    warn "(move it aside if you meant the companion repo to own it)"
+    exit 0
+fi
+
+current_target="$(readlink "$DROPIN" 2>/dev/null || true)"
+if [[ "$current_target" == "$SOURCE_CONF" ]]; then
+    ok "Companion drop-in already linked: $DROPIN"
 else
-    warn "$CUSTOM_DIR/install.sh failed (rc=$?) — continuing with the rest of the bootstrap"
-    warn "(re-run it on its own once fixed: mise run setup:custom-hookup)"
+    ln -sfn "$SOURCE_CONF" "$DROPIN"
+    ok_changed "Linked $DROPIN → $SOURCE_CONF"
+fi
+
+# ─── Validate BEFORE applying ─────────────────────────────────────────────────
+# The drop-in is now loadable by every mise command on this machine, and two of
+# its possible defects are machine-wide rather than local: a key that collides
+# with the main repo resolves by undefined precedence (§2.2), and an entry whose
+# explicit source is missing aborts the ENTIRE apply — this repo's entries
+# included (§2.16). `lint-config.py --live` checks both. If it fails, take the
+# link back out: a companion repo must never be able to break the main one.
+if have python3 && [[ -f "$REPO/scripts/lint-config.py" ]]; then
+    lint_rc=0
+    python3 "$REPO/scripts/lint-config.py" --live || lint_rc=$?
+    case "$lint_rc" in
+        0) ok "Companion config passed the live lint" ;;
+        2) warn "Live lint unavailable on this python — proceeding unchecked" ;;
+        *)
+            rm -f "$DROPIN"
+            warn "Companion config FAILED the live lint (see above) — link removed."
+            warn "Nothing was applied; the rest of this machine is unaffected."
+            warn "Fix $SOURCE_CONF, then: mise run setup:custom-hookup"
+            exit 0
+            ;;
+    esac
+fi
+
+# ─── Back up anything it would overwrite, then apply ──────────────────────────
+# install.sh's backup pass ran before this drop-in existed (it is created here,
+# at bootstrap step 12, on a fresh machine), so it could not have seen these
+# targets. It matters most for ~/.ssh/config: a template-mode entry overwrites
+# a pre-existing real file SILENTLY — no error, no backup — where symlink mode
+# refuses (§2.26, reproduced against a real ~/.ssh/config).
+backup_differing() {
+    have python3 || return 0
+    { mise dotfiles status --json 2>/dev/null || true; } \
+        | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+for f in data.get("files", []):
+    if f.get("state") == "differs":
+        print(f["target"])
+' \
+        | while IFS= read -r target; do
+            expanded="${target/#\~/$HOME}"
+            # Real files only. A symlink is never data to mise, and replacing
+            # one is what an apply is for.
+            [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+            bak="$expanded.pre-mise.bak"
+            n=1
+            while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
+            warn "Backing up $target → $bak before applying the companion repo"
+            mv "$expanded" "$bak" || warn "Could not move $expanded aside"
+        done
+}
+backup_differing
+
+# Apply now rather than leaving it for the next bootstrap: the very next chain
+# step (setup:git-signing) reads ~/.gitconfig.local.example, which this repo
+# deploys. Verified that a chained task can apply within the same bootstrap and
+# the next step sees the result.
+if mise dotfiles apply --yes >/dev/null 2>&1 || mise dotfiles apply >/dev/null 2>&1; then
+    ok "Applied the companion repo's dotfiles"
+else
+    warn "\`mise dotfiles apply\` failed after linking the companion repo"
+    warn "(run it by hand to see why: mise dotfiles status)"
 fi

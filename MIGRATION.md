@@ -15,7 +15,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | Stow package `mise` (nested stow) | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
 | conf.d tool groups (`runtime cli dev ai yazi neovim`) | core `[tools]` + profile files | 1–2 |
 | `.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + `setup:{device-tag,exclude,mise-conf-exclude,install-exclude}` | `mise/miserc.toml` profiles | 0 |
-| tag-default→tag-X fallback | template-mode entries on `mise_env` | 2 |
+| ~~tag-default→tag-X fallback~~ ✅ | template-mode entries on `mise_env`; the companion's `ssh/tag-{laptop,desktop}` is now ONE template | 2, 6 |
 | oh-my-zsh installer, plugin/p10k/fzf-tab clones (`setup:zsh`, `setup:shell-tools`) | `[bootstrap.repos]` | 1 |
 | oh-my-tmux + nvim git **submodules** | `[bootstrap.repos]` (real clones at live paths) | 2 |
 | ~~`install:pathpicker`~~ ✅ | `[bootstrap.repos]` + `setup:repo-links` task | 2–3 |
@@ -33,15 +33,15 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | hostname prompt (`setup:zsh` Phase 6) | dropped — see below | 3a |
 | ~~`install:gnome-extensions`, `update:gnome-extensions`~~ ✅ | `gnome` profile tasks (manifest still supplied by the custom repo) | 4 |
 | ~~`setup:cosmic*`~~ ✅ | `cosmic` profile tasks (theme picker is manual, not chained) | 4 |
-| `gpg:*` suite | ported near-verbatim | 5 |
-| `update:submodules` + submodule-freshness workflow | `update:repos` task + workflow | 5 |
-| `update:obsidian` | ported | 5 |
-| `lint` (shellcheck/shfmt) | ported + `lint-config` collision lint | 0, 5 |
+| ~~`gpg:*` suite~~ ✅ | ported; every mutating path gained a preview/confirm and a pre-import keyring backup | 5 |
+| ~~`update:submodules` + submodule-freshness workflow~~ ✅ | `update:repos` task + `scripts/check-repos.py` + a monthly *notifier* workflow (there is no committed pointer left to bump, so the old PR shape does not transfer) | 5 |
+| ~~`update:obsidian`~~ ✅ | ported (`--check`); `install:obsidian` reports, `update:obsidian` installs | 5 |
+| ~~`lint` (shellcheck/shfmt)~~ ✅ | `repo:lint` — namespaced, and widened to config lint + shellcheck + shfmt + `bash -n`/`zsh -n`; CI calls the task rather than re-deriving the file set | 0, 5 |
 | p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`) | run wizard → `mise dotfiles add ~/.p10k.zsh` | 5 (docs) |
-| `~/.dotfiles-custom` + `setup:custom-dotfiles` | custom repo v2: `conf.d/50-custom.toml` drop-in | 6 |
+| ~~`~/.dotfiles-custom` + `setup:custom-dotfiles`~~ ✅ | companion repo v2 (`~/.dotfiles-custom-mise`): data only, one `conf.d/50-custom.toml` drop-in — see [CUSTOM.md](CUSTOM.md) | 6 |
 | git config: aliases, delta, lfs, credential helpers, `.git-completion.bash`, `.git-prompt.sh`, `.git-template/` | **moved out of the custom repo** into `home/` — none of it is private | 6 |
-| git identity (`user.name`/`user.email`) | private repo → `~/.gitconfig.identity`, pulled in by an `[include]` | 6 |
-| `setup:git-signing` data (`~/.gitconfig.local.example` from custom repo) | stays in custom repo (privacy) | 6 |
+| ~~git identity (`user.name`/`user.email`)~~ ✅ | companion repo → `~/.gitconfig.identity`, pulled in by an `[include]` | 6 |
+| ~~`setup:git-signing` data (`~/.gitconfig.local.example`)~~ ✅ | stays in the companion repo (privacy) | 6 |
 | Public-mirror sanitize workflow | TBD (ask user) | 6 |
 
 ### Consciously dropped (user-approved 2026-07-19)
@@ -72,6 +72,17 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   skipped the upgrade under `DOTFILES_NONINTERACTIVE`. Without a prompt, upgrading by
   default would swap a running app's binary whenever upstream moved, so an available
   upgrade is now *reported* and applied only with `--update`.
+- **`.custom-packages` + `setup:custom-dotfiles`.** The INI tracker, the tag directories, the
+  `recurse_dirs` no-fold handling and the unstow-restore path were all stow bookkeeping. Adding a
+  private file is now `cp` plus one line in `mise/config.custom.toml` (CUSTOM.md), or
+  `mise dotfiles add`.
+- **Most of `install:build-deps`.** The old task installed `autoconf automake libtool clang
+  libclang-dev nasm yasm libjpeg/png/tiff/webp/freetype/fontconfig/ltdl-dev python3-pip
+  libssl-dev libevent-dev libncurses-dev perl` — a source-build toolchain for the stow and zsh
+  fallbacks (both dropped, D7) and for compiling ffmpeg/imagemagick (now apt packages in the
+  `media` profile). What survives is `build-essential` + `pkg-config`, which is what the `cargo:`
+  backend needs. If a tool later fails to build for want of `libssl-dev` or `libclang-dev`, add
+  it back to `[bootstrap.packages]` — that is the intended repair, not a regression.
 - **The `busybox unzip` third-choice font extractor** (`setup:zsh` had unzip → python3 →
   busybox). `unzip` is a `[bootstrap.packages]` entry and python3 is required by
   `install.sh` anyway, so the third rung had no reachable audience.
@@ -144,6 +155,22 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   does *not* reap links whose profile was deselected, because mise has no removal semantics
   and the source is still right there. Deselecting `gnome` leaves `~/.themes/*` behind;
   delete those by hand when switching desktops.
+- **ANY untracked, non-gitignored file in ANY `[bootstrap.repos]` clone aborts the whole
+  bootstrap** at the repos step (step 2 of 11) — `mise ERROR repos: ~/x has local changes`, rc=1,
+  and dotfiles/tools/the task chain never run (verified 2026-07-21). This is not hypothetical:
+  oh-my-zsh creates `~/.oh-my-zsh/completions/`, and generated `_tool` completion files land
+  inside the plugin clones. `install.sh` pre-flights `repos status` and refuses with the offending
+  paths rather than letting mise die halfway; `mise run update:repos` reports the same set. The
+  cheapest fix for a generated file is `printf '<name>\n' >> <clone>/.git/info/exclude` — mise
+  treats a gitignored file as clean, and `.git/info/exclude` is local to the clone.
+- **Who updates a `[bootstrap.repos]` clone is the opposite of what "pinned" suggests** (verified):
+  `ref = "<branch>"` means **mise** fast-forwards it on every bootstrap — and a *diverged* one
+  fails the bootstrap outright — while an entry with **no `ref`** is never touched again after
+  the first clone. `mise run update:repos` owns the second class (oh-my-zsh, the zsh plugins,
+  p10k, fzf-tab, PathPicker) and only reports on the first.
+- **`[dotfiles].source` is not templated.** `{{ env.X }}` is taken as a literal path segment,
+  exactly like `[bootstrap.repos].url`. This is why the companion repo must live at
+  `~/.dotfiles-custom-mise` (CUSTOM.md rule 4).
 - **`dconf` exits 0 with nowhere to persist a write** (no session bus / a sandboxed HOME):
   the write silently goes nowhere. `setup:fonts` reads the value back rather than trusting
   the exit code.
@@ -153,10 +180,21 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 1. `cd ~/.dotfiles && git pull` — make sure the old repo is current, commit any local changes.
 2. Back up (`-h` dereferences the stow symlinks so the archive stores real content, not
    dangling links):
-   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.p10k.zsh ~/.fzf.zsh ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp ~/.themes ~/.local/share/{fonts,gnome-extensions,applications/obsidian.desktop} 2>/dev/null`
-3. Unstow everything with the OLD repo (restores its `.bak` backups):
+   `tar czhf ~/dotfiles-backup-$(date +%F).tgz ~/.zshrc ~/.zshenv ~/.zprofile ~/.bashrc ~/.bash_logout ~/.profile ~/.p10k.zsh ~/.fzf.zsh ~/.gitconfig* ~/.git-completion.bash ~/.git-prompt.sh ~/.git-template ~/.ssh/config ~/.config/{mise,tmux,bat,fzf,yazi,gh,gh-dash,ghostty,ruff,hunk,completions} ~/.claude ~/.gnupg/gpg-agent.conf ~/.local/bin/fpp ~/.themes ~/.local/share/{fonts,gnome-extensions,applications/obsidian.desktop} 2>/dev/null`
+   Every one of those is a `[dotfiles]` target now, i.e. a candidate for
+   `install.sh`'s move-aside. `~/.ssh/config` and `~/.gitconfig*` matter most: the first is
+   deployed in **template** mode, which overwrites a real file with no error and no backup of
+   its own, and the second is where your git identity lives.
+3. Unstow everything with **both** old repos (this restores their `.bak` backups):
    for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
-   `.device-tag`). The `mise` package last.
+   `.device-tag`). The `mise` package last. Then the companion:
+   `stow -D -d ~/.dotfiles-custom/<pkg> -t ~ tag-<tag>` for `git`, `ssh`, `p10k` and
+   `gnome_extensions` — `install.sh` refuses to run while anything still resolves into either
+   clone.
+3b. Clean the `[bootstrap.repos]` clones. `git -C ~/.oh-my-zsh status --porcelain` and the same
+   for each plugin clone: any untracked file there aborts the bootstrap (see the limitations
+   above). On the author's laptop this is `~/.oh-my-zsh/completions/` and generated `_helm` /
+   `_kubectl` in the autosuggestions clone.
 4. `git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise`
 5. `DOTFILES_PROFILES=<your profiles> ~/.dotfiles-mise/install.sh`
    — install.sh moves any conflicting real files (restored stow backups, skel rc files) aside
@@ -169,6 +207,11 @@ Working document. Cutover checklist at the bottom is the only part end users nee
      vagrant completion fpath, java stanzas, work tooling.
    - `~/.zshenv.local` / `~/.bashrc.local`: anything else machine-specific.
 7. Verify: `mise bootstrap status --missing` exits 0; open a new shell; run `mise doctor`.
-8. Wire the custom repo (Phase 6 docs) and re-run `mise bootstrap --yes`.
+8. Wire the companion repo — clone it to `~/.dotfiles-custom-mise` (see [CUSTOM.md](CUSTOM.md))
+   and **re-run `~/.dotfiles-mise/install.sh`**, not `mise bootstrap`. Only `install.sh` runs the
+   old-repo guard, the live collision lint and the conflict backup, and the companion's
+   `~/.ssh/config` entry is deployed in template mode, which replaces a real file without a
+   backup of its own. (`mise run setup:custom-hookup` is the equivalent for a machine that is
+   already cut over: it repeats the same backup and lint before applying.)
 9. Old state files (`.device-tag` etc.) stay in the old clone; the old repo remains usable as
    an archive (gpg backups history, etc.). Do not delete it until comfortable.

@@ -51,6 +51,33 @@ if ! command -v mise &>/dev/null && [[ ! -x "$HOME/.local/bin/mise" ]]; then
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
+# ── 1b. Work around libcurl-gnutls + HTTP/2 before any cloning ────────────────
+# `[bootstrap.repos]` clones at bootstrap step 2, using whatever git is on PATH
+# — on a fresh machine that is apt's git, which Debian/Ubuntu link against
+# libcurl-gnutls. That combination drops large packs mid-transfer on some
+# networks: `RPC failed; curl 56 GnuTLS recv error (-24)`, `early EOF`,
+# `fetch-pack: invalid index-pack output`. A failing clone aborts the ENTIRE
+# bootstrap (§2.28), so a fresh install dies at step 2 with nothing deployed.
+#
+# Measured on the author's network (2026-07-21), cloning oh-my-zsh:
+#   /usr/bin/git (libcurl-gnutls), HTTP/2 default → fails
+#   /usr/bin/git (libcurl-gnutls), http.version=HTTP/1.1 → 26 MB, clean
+#   conda git (OpenSSL libcurl), HTTP/2 default → 26 MB, clean
+# which is the same libcurl-gnutls trouble that made `conda:git` a core tool in
+# the first place — except that tool is installed at step 9, seven steps too
+# late to help the clones.
+#
+# GIT_CONFIG_COUNT rather than a config file: mise runs git as a child process,
+# so the environment reaches it, and nothing has to be written into ~/.gitconfig
+# — which at this point is neither deployed nor safe to create (it is a managed
+# symlink target, and a real file there would collide with its [dotfiles] entry).
+if git_https_helper="$(git --exec-path 2>/dev/null)/git-remote-https" \
+    && ldd "$git_https_helper" 2>/dev/null | grep -q 'libcurl-gnutls'; then
+    export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1
+    info "git is linked against libcurl-gnutls — forcing HTTP/1.1 for clones"
+    info "(HTTP/2 + gnutls truncates large packs on some networks; see install.sh)"
+fi
+
 # ── 2. GitHub token ───────────────────────────────────────────────────────────
 # Installing [tools] resolves aqua/github-backed tools through the GitHub
 # releases API (60 req/hr unauthenticated). The token must be exported HERE —

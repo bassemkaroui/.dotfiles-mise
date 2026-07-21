@@ -151,6 +151,19 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   declares before its first apply (keyed on the config file, not on `mise dotfiles status`,
   whose view of a just-created drop-in proved unreliable). This is why the cutover backup tar
   matters even though mise "shouldn't" clobber anything.
+- **apt's git is linked against `libcurl-gnutls`, which truncates large packs over HTTP/2 on
+  some networks** — `RPC failed; curl 56 GnuTLS recv error (-24)`, `early EOF`,
+  `fetch-pack: invalid index-pack output`. It bites at bootstrap step 2, where
+  `[bootstrap.repos]` clones with whatever git is on PATH; the OpenSSL-linked `conda:git` that
+  avoids the problem is a `[tools]` entry installed at step 9, seven steps too late. And a
+  failing clone aborts the whole bootstrap, so a fresh install dies with nothing deployed.
+  Measured on the author's network cloning oh-my-zsh: gnutls git + HTTP/2 fails, the same git
+  with `http.version=HTTP/1.1` succeeds, conda git with HTTP/2 succeeds. `install.sh` detects
+  the gnutls linkage (`ldd $(git --exec-path)/git-remote-https`) and exports
+  `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1` for the
+  bootstrap — an environment override, so nothing is written into `~/.gitconfig`, which at that
+  point is neither deployed nor safe to create. If you hit this running `mise bootstrap`
+  directly, export the same three variables.
 - **git carries no file modes** beyond the executable bit, so a template committed 0600 renders
   0664 from a clone — and ssh rejects a group-writable config outright.
   `setup:custom-hookup` re-applies 0700/0600 under `~/.ssh` after applying.

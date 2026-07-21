@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#MISE description="List your GPG secret keys with capabilities, expiry, and days remaining"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="gpg:list"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/gpg.sh
+source "$LIB/gpg.sh"
+
+require_gpg
+
+mapfile -t rows < <(secret_keys_stream)
+if ((${#rows[@]} == 0)); then
+    warn "No secret keys found in keyring"
+    exit 0
+fi
+
+print_expiry_header 1
+for row in "${rows[@]}"; do
+    print_expiry_row "$row" 1
+done
+
+count="$(primary_fprs | wc -l)"
+ok "Listed $count secret primary key(s)"

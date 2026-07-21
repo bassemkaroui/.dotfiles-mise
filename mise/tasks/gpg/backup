@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#MISE description="Back up secret keys + public keys + ownertrust to a symmetrically-encrypted tarball (does NOT generate revocation certs — run gpg --gen-revoke manually)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="gpg:backup"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/gpg.sh
+source "$LIB/gpg.sh"
+
+require_gpg
+
+# gpg-agent needs GPG_TTY to know which terminal to route pinentry prompts to
+# when gpg's stdin is a pipe (as in the `tar | gpg --symmetric` step below).
+# Without it the second prompt fails with "Inappropriate ioctl for device".
+if [[ -z "${GPG_TTY:-}" ]]; then
+    if tty_path="$(tty 2>/dev/null)"; then
+        export GPG_TTY="$tty_path"
+    fi
+fi
+
+BACKUP_DIR="${GPG_BACKUP_DIR:-$HOME/.gnupg-backups}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+OUT="$BACKUP_DIR/gpg-backup-${STAMP}.tar.gpg"
+
+mapfile -t primaries < <(primary_fprs)
+if ((${#primaries[@]} == 0)); then
+    warn "No secret keys found — nothing to back up"
+    exit 0
+fi
+
+# Both gpg invocations below prompt for a passphrase at a pinentry. Unattended
+# that is a hang, not a failure, so refuse up front rather than wedging a cron
+# job or a CI step. (This task is never part of [tasks.bootstrap].)
+if [[ ! -t 0 ]] && [[ -z "${GPG_BACKUP_FORCE_UNATTENDED:-}" ]]; then
+    skip "gpg:backup needs a terminal for the two passphrase prompts (set GPG_BACKUP_FORCE_UNATTENDED=1 to try anyway)"
+fi
+
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+
+STAGING="$(mktemp -d)"
+chmod 700 "$STAGING"
+trap 'rm -rf "$STAGING"' EXIT
+
+info "Exporting ${#primaries[@]} secret primary key(s) — gpg-agent may prompt for your PRIMARY-key passphrase"
+gpg --quiet --armor --export-secret-keys "${primaries[@]}" >"$STAGING/secret-keys.asc"
+gpg --quiet --armor --export "${primaries[@]}" >"$STAGING/public-keys.asc"
+gpg --export-ownertrust >"$STAGING/ownertrust.txt" 2>/dev/null
+
+cat >"$STAGING/README" <<EOF
+GPG backup created $STAMP by mise run gpg:backup.
+
+Contents:
+  secret-keys.asc   Own secret keys (armored)
+  public-keys.asc   Own public keys (armored)
+  ownertrust.txt    Ownertrust database
+
+Restore with:
+  mise run gpg:restore --archive <this-archive>
+
+This backup does NOT include revocation certificates. Generate them separately
+with 'gpg --gen-revoke <fpr>' and store them somewhere safe and distinct.
+EOF
+
+info "Encrypting tarball with AES256 — pick a FRESH passphrase for this backup (not your primary-key passphrase)"
+tar -cf - -C "$STAGING" . | gpg --symmetric --cipher-algo AES256 -o "$OUT"
+chmod 600 "$OUT"
+
+ok_changed "Backup written: $OUT"

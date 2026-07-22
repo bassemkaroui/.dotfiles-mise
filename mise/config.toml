@@ -65,7 +65,7 @@ jq = "latest"
 "apt:git" = "latest"
 # used by install.sh, tasks, and various tool installers
 "apt:curl" = "latest"
-# cargo: backend builds (tree-sitter-cli) and general rust development
+# cargo: backend builds and general rust development
 "apt:build-essential" = "latest"
 "apt:pkg-config" = "latest"
 # font/archive handling in tasks

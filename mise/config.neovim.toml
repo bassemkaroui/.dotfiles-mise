@@ -4,7 +4,10 @@
 # restored by the update:repos task (Phase 5) — it isn't recorded by a clone.
 [tools]
 neovim = "stable"
-"cargo:tree-sitter-cli" = { version = "latest", depends = "rust" }
+# Prebuilt CLI (aqua:tree-sitter/tree-sitter) — same versions as the release
+# binaries. The old cargo:tree-sitter-cli source build fails without libclang
+# (rquickjs-sys → bindgen); the prebuilt needs no toolchain.
+tree-sitter = "latest"
 
 [bootstrap.repos]
 "~/.config/nvim" = { url = "https://github.com/bassemkaroui/kickstart.nvim.git", ref = "custom_config" }

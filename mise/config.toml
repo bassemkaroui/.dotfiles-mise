@@ -232,11 +232,13 @@ run = [
 # and from setup:git-signing (D12). git ignores a missing include, so a machine
 # without either still has a working git.
 #
-# copy, not symlink: `git config --global` follows the symlink and rewrites the
-# file it points at, so a single `git config --global user.email` (or `gh auth
-# login`, or `git lfs install`) edits a tracked file inside this repo — which is
-# public. See the header of home/.gitconfig.
-"~/.gitconfig" = { mode = "copy" }
+# symlink, deliberately — but with a caveat worth knowing (see the header of
+# home/.gitconfig). `git config --global` follows a symlink and rewrites the
+# file it points at, so `git config --global user.email …` would write INTO
+# this (public) repo's working tree. The rule on these machines is therefore:
+# set identity in ~/.gitconfig.identity (the companion repo), signing in
+# ~/.gitconfig.local — never with `git config --global`.
+"~/.gitconfig" = { mode = "symlink" }
 # Sourced by the guarded stanzas in home/.bashrc.
 "~/.git-completion.bash" = { mode = "symlink" }
 "~/.git-prompt.sh" = { mode = "symlink" }

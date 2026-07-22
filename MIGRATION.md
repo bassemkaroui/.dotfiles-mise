@@ -146,12 +146,18 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
   change the mode afterwards.
 - **`git config --global` writes THROUGH a symlink.** git resolves a symlinked
-  `~/.gitconfig` and rewrites its target: the link survives, the repo file changes. With
-  this repo public, one `git config --global user.email`, `gh auth login` or
-  `git lfs install` would have put private values in a tracked file. `~/.gitconfig` is
-  therefore deployed with `mode = "copy"`, which is what dotfiles.md recommends for
-  configs a tool rewrites in place — at the cost that a local `git config --global` is
-  reverted by the next apply. Per-machine git settings belong in `~/.gitconfig.local`.
+  `~/.gitconfig` and rewrites its target: the link survives, the repo file changes
+  (verified). With this repo public, one `git config --global user.email`, `gh auth login`
+  or `git lfs install` puts a value in a tracked file. `~/.gitconfig` is kept as a
+  **symlink** (single source of truth) and the hazard is handled by a rule instead of the
+  mode: **do not `git config --global` on these machines** — set identity in
+  `~/.gitconfig.identity` and signing in `~/.gitconfig.local` (both included, both
+  private/gitignored), and edit `home/.gitconfig` + commit for anything shared. The
+  `[include]` does NOT redirect the write — includes affect reads, not writes. A banner at
+  the top of `home/.gitconfig` states this, and CI asserts the banner is present and that
+  the write really does reach the repo (so the warning can't go stale). `mode = "copy"`
+  would have prevented the write mechanically but silently reverts any local
+  `git config --global` on the next apply, which was judged the worse surprise.
 - **`mode = "template"` overwrites a pre-existing real file silently** — no error, no backup,
   where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target,
   not just symlink-mode ones, and additionally backs up every target the companion repo

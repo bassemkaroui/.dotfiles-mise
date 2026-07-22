@@ -263,23 +263,25 @@ jobs:
             err() { echo "::error::$1"; fail=1; }
 
             # --- core deployment ---
-            for f in .zshrc .zshenv .bashrc .profile .p10k.zsh .config/mise/config.toml; do
+            for f in .zshrc .zshenv .bashrc .profile .p10k.zsh .gitconfig .config/mise/config.toml; do
               [[ -L "$HOME/$f" ]] || err "missing or not a symlink: ~/$f"
             done
-            # ~/.gitconfig is mode = "copy" on purpose: `git config --global`
-            # writes through a symlink and would edit the repo working tree.
-            # So it must be a REAL file, and it must match the repo source.
-            [[ -f "$HOME/.gitconfig" && ! -L "$HOME/.gitconfig" ]] \
-              || err "~/.gitconfig must be a real file (mode = copy), not a symlink"
-            cmp -s "$HOME/.gitconfig" "$HOME/.dotfiles-mise/home/.gitconfig" \
-              || err "~/.gitconfig does not match the repo source"
-            # And a --global write must NOT reach the repo.
+            # ~/.gitconfig is a symlink by choice; the safety net is a documented
+            # rule (do not git config --global), not the mode. Assert the warning
+            # that carries that rule is present in the deployed file, so it
+            # cannot be quietly dropped. (No apostrophes or single quotes in this
+            # whole block: it is wrapped in bash -lc with single quotes, which a
+            # stray quote would terminate.)
+            grep -q "DO NOT run .git config --global" "$HOME/.gitconfig" \
+              || err "~/.gitconfig is missing the do-not-git-config-global warning banner"
+            # And confirm the hazard is real, so the warning stays earned: a
+            # --global write DOES reach the repo through the symlink. (We assert
+            # it happens, then undo it — this is the behaviour the banner warns
+            # about, reproduced.)
             git config --global core.pager cat
-            [[ -z "$(git -C "$HOME/.dotfiles-mise" status --porcelain home/.gitconfig)" ]] \
-              || err "git config --global wrote into the repo working tree"
-            # Restore deterministically: a later step asserts convergence, and
-            # `--unset` can leave an empty [core] section behind.
-            cp -f "$HOME/.dotfiles-mise/home/.gitconfig" "$HOME/.gitconfig"
+            [[ -n "$(git -C "$HOME/.dotfiles-mise" status --porcelain home/.gitconfig)" ]] \
+              || err "expected git config --global to write through the symlink into the repo (banner would be stale)"
+            git -C "$HOME/.dotfiles-mise" checkout -- home/.gitconfig
             [[ -d "$HOME/.oh-my-zsh" ]]  || err "oh-my-zsh not cloned"
             [[ -L "$HOME/.config/tmux/tmux.conf" ]] || err "setup:repo-links did not link tmux.conf"
             command -v zsh >/dev/null || err "zsh (apt) not installed"

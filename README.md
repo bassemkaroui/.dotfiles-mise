@@ -163,11 +163,13 @@ with template mode.
   config files. `scripts/lint-config.py` fails the build otherwise.
 - **Hooks are unconditional.** `$MISE_ENV` does not reach `[bootstrap.hooks]` (verified) —
   profile-gated logic lives in tasks, which do see it.
-- **Config a tool rewrites in place is deployed by `copy`, not `symlink`.**
-  `git config --global` resolves a symlinked `~/.gitconfig` and rewrites the file it
-  points at, so a symlink would let one `git config --global user.email` edit a tracked
-  file in this public repo. Copy mode costs you the write on the next apply — put
-  per-machine git settings in `~/.gitconfig.local`.
+- **Never run `git config --global …` on these machines.** `~/.gitconfig` is a symlink
+  into this (public) repo, and `git config --global` follows the symlink and writes into
+  the repo working tree — the `[include]` for `~/.gitconfig.identity` does not save you,
+  because includes redirect config *reads*, never *writes*. Set identity in
+  `~/.gitconfig.identity` (companion repo) and signing in `~/.gitconfig.local`; to change
+  something shared by every machine, edit `home/.gitconfig` and commit it. There is a
+  warning banner at the top of that file spelling this out.
 - **Sensitive dirs are never whole-dir symlinks** (`~/.gnupg`, `~/.config/gh`, `~/.claude`,
   `~/.ssh`) so live tokens/keys can't land in the repo tree.
 - **No `[dotfiles]` source may point at something bootstrap creates.** An entry whose explicit

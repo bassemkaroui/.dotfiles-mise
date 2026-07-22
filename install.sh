@@ -626,8 +626,10 @@ backup_conflicts
 # loaded while it is set. Pass 1 therefore only creates the config links; pass 2
 # runs without the variable, with the profiles this machine selected actually in
 # effect. (Verified on 2026.7.7 — a single pass would install core only.)
-YES=()
-[[ "$NONINTERACTIVE" == "1" ]] && YES=(--yes)
+# install.sh already owns every interactive decision (profiles, gh auth,
+# backups) before it calls bootstrap, so mise's per-step confirmations are pure
+# noise — always answer them for the user.
+YES=(--yes)
 
 if [[ -L "$CONF/config.toml" ]]; then
     ok "mise config already linked — skipping the link-only pass"

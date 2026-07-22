@@ -110,6 +110,30 @@ A file that differs per machine is **one** template branching on the profiles in
 > 0664 and the rendered file inherits that. `setup:custom-hookup` enforces 0700
 > on `~/.ssh` and 0600 on the files in it after applying.
 
+## Your git identity goes here, not in `git config --global`
+
+Name and email live in `~/.gitconfig.identity` — a file this companion repo
+owns and deploys — pulled into your config by an `[include]` at the end of the
+main repo's `~/.gitconfig`. Set them by editing that file:
+
+```toml
+# ~/.dotfiles-custom-mise/home/.gitconfig.identity
+[user]
+	name = Your Name
+	email = you@example.com
+```
+
+then `mise run setup:custom-hookup` (or just `mise dotfiles apply`).
+
+**Do not use `git config --global user.email …` on these machines.** The main
+repo's `~/.gitconfig` is deployed as a symlink, and `git config --global`
+follows the symlink and writes into the (public) repo working tree — the
+`[include]` does *not* redirect that write, because includes affect only how
+git *reads* config, never where it *writes* (`--global` always targets
+`~/.gitconfig` itself). Keeping identity in `~/.gitconfig.identity` sidesteps
+the whole problem: it never touches the public file. Signing config works the
+same way through `~/.gitconfig.local` (written by `setup:git-signing`).
+
 ## If you don't have a companion repo
 
 Nothing to do. Every machine works without one: `~/.gitconfig` ends with

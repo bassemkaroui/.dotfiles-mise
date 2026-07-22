@@ -9,16 +9,21 @@
 # include whose file does not exist, so a machine without either still gets a
 # working git — it just won't know who you are until you supply one.
 #
-# Deployed with mode = "copy", NOT symlink, deliberately. `git config --global`
-# writes THROUGH a symlink: git resolves it and rewrites the file it points at
-# (verified — the link survives, the target changes). With a symlink here, one
-# `git config --global user.email …`, one `gh auth login` or one
-# `git lfs install` would silently edit a tracked file inside a PUBLIC repo
-# working tree. Copy mode is what dotfiles.md recommends for "tools that
-# rewrite their config in place". The cost is that a local `git config
-# --global` is reverted by the next `mise dotfiles apply` — put per-machine
-# values in ~/.gitconfig.local, or `mise dotfiles add ~/.gitconfig` to keep an
-# edit you meant.
+# ┌─ DO NOT run `git config --global …` on these machines ──────────────────────┐
+# │ This file is deployed as a SYMLINK, and `git config --global` follows the   │
+# │ symlink: git rewrites the file it points at, which is THIS file inside the  │
+# │ (public) repo working tree — the link survives, the repo file changes       │
+# │ (verified). So `git config --global user.email …`, and anything that writes │
+# │ global config for you (`gh auth login`, `git lfs install`), would leave     │
+# │ your value as an uncommitted change in a public repo.                       │
+# │                                                                             │
+# │ An [include] does NOT save you: includes redirect READS, never WRITES —     │
+# │ `--global` always targets ~/.gitconfig itself, not ~/.gitconfig.identity.   │
+# │                                                                             │
+# │ Set identity in ~/.gitconfig.identity (companion repo) and signing in       │
+# │ ~/.gitconfig.local instead; both are included below and neither is public.  │
+# │ To change something SHARED by every machine, edit this file and commit it.  │
+# └─────────────────────────────────────────────────────────────────────────────┘
 
 [pull]
 	rebase = true

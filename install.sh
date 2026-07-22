@@ -80,29 +80,32 @@ fi
 
 # ── 2. GitHub token ───────────────────────────────────────────────────────────
 # Installing [tools] resolves aqua/github-backed tools through the GitHub
-# releases API (60 req/hr unauthenticated). The token must be exported HERE —
-# in the parent process of `mise bootstrap` — hooks and tasks run too late.
+# releases API (60 req/hr unauthenticated, and throttled/slow when anonymous). A
+# token lifts the cap AND makes responses fast, so it is worth getting one before
+# `mise bootstrap`. It must be exported HERE, in the parent process — hooks and
+# tasks run too late. mise reads it from GITHUB_TOKEN / MISE_GITHUB_TOKEN (and
+# from a gh login).
 #
-# Two things bite a tokenless install on a fresh/slow box; the mise settings
-# docs explain the confusing one:
-#
-#   * `mise exec gh@latest` is a "fast command" (prefer_offline), and mise HARD
-#     CAPS fetch_remote_versions_timeout at 3s for those "so shims and shell
-#     activation do not block". That 3s cap — not the network, not a wrong
-#     value — is why the gh probe timed out at exactly 3.00s and why raising the
-#     setting had no effect on it. So this step does NOT install gh on the fly
-#     to get a token: that path is the only 3s-capped step here and the one that
-#     failed. It uses gh only if it is ALREADY present, and otherwise takes a
-#     pasted token — which needs no gh and no working API (you make it in a
-#     browser and paste it).
-#
-#   * The real `mise bootstrap` tool installs are NOT fast commands, so they use
-#     the FULL fetch_remote_versions_timeout (default 20s) — far more headroom
-#     than the 3s probe suggested. We raise it for a slow uplink; overridable.
-#     A token still helps most: mise reads GITHUB_TOKEN / MISE_GITHUB_TOKEN (and
-#     gh's hosts.yml), and an authenticated API is neither capped (60 req/hr)
-#     nor throttled, so responses come back in time.
+# Raise the version-list timeout for the real bootstrap — a slow uplink can
+# exceed the 20s default. This does NOT affect mise's "fast commands" (hook-env,
+# activate, exec, env, ls, current, where, which, shims), which mise HARD-CAPS at
+# 3s "so shims and shell activation do not block". That cap is the whole reason
+# an earlier `mise exec gh@latest` probe timed out at 3.00s — so gh is installed
+# below with `mise install` (NOT a fast command → full timeout), after which
+# `mise exec gh@latest -- gh` runs from the local install without touching the API.
 export MISE_FETCH_REMOTE_VERSIONS_TIMEOUT="${MISE_FETCH_REMOTE_VERSIONS_TIMEOUT:-60s}"
+
+# Run gh whether it is already on PATH or only mise-installed. Once gh is
+# installed, `mise exec gh@latest -- gh` resolves it from the local install, so
+# this is NOT subject to the 3s fast-command cap (verified).
+gh_run() {
+    mkdir -p "${GH_CONFIG_DIR:-$HOME/.config/gh}" 2>/dev/null || true # gh errors without it
+    if command -v gh &>/dev/null; then
+        gh "$@"
+    else
+        mise exec gh@latest -- gh "$@"
+    fi
+}
 
 if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -116,42 +119,43 @@ if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
         export MISE_GITHUB_TOKEN
         ok "GitHub token loaded from gh CLI"
     elif [[ "$NONINTERACTIVE" == "1" ]]; then
-        warn "No GitHub token found — tool installs may hit API rate limits."
-        warn "Set GITHUB_TOKEN (a no-scope PAT is enough) and re-run if that happens."
+        # No terminal for a device-code login (CI, curl | bash). gh still gets
+        # installed later as a [tools] entry; this run just goes unauthenticated.
+        warn "No GitHub token found — installing tools against the unauthenticated"
+        warn "API (60 req/hr). Set GITHUB_TOKEN (a no-scope PAT) and re-run if limited."
     else
-        warn "No GitHub token found. Without one the GitHub API is rate-limited"
-        warn "(60 req/hr) and, unauthenticated, slow enough that a fresh box can"
-        warn "time out resolving tool versions. A token fixes both."
-        # gh auth login ONLY if gh is already installed — never install gh here
-        # to get a token (that runs `mise exec gh@latest`, a fast command mise
-        # caps at 3s, and it needs the very API that is failing). Best-effort:
-        # each command guarded in the `if` so `set -e` cannot abort the script.
-        if command -v gh &>/dev/null; then
-            read -rp "Authenticate with GitHub via gh now? [Y/n] " a || a=n
-            if [[ ! "$a" =~ ^[Nn]$ ]]; then
+        warn "No GitHub token found. A token lifts the 60 req/hr cap and speeds"
+        warn "up tool installs. gh can fetch one via a browser device-code login."
+        read -rp "Authenticate with GitHub via gh now? [Y/n] " a || a=n
+        if [[ ! "$a" =~ ^[Nn]$ ]]; then
+            # Make sure gh is present. It is a managed [tools] entry, so the
+            # bootstrap installs it regardless — but to authenticate BEFORE
+            # bootstrap we install it now, with `mise install` (NOT `mise exec`:
+            # exec is a 3s-capped fast command, which is what failed before;
+            # install uses the full timeout above). Non-fatal throughout: a
+            # failed install or login just leaves the run unauthenticated.
+            gh_ready=true
+            if ! command -v gh &>/dev/null; then
+                info "Installing gh to authenticate (one-off; it is a managed tool anyway)..."
+                mise install gh@latest || {
+                    gh_ready=false
+                    warn "Could not install gh — is the GitHub API reachable from here?"
+                }
+            fi
+            if [[ "$gh_ready" == true ]]; then
                 gh_token=""
-                if gh auth login && gh_token="$(gh auth token 2>/dev/null)" \
+                if gh_run auth login && gh_token="$(gh_run auth token 2>/dev/null)" \
                     && [[ -n "$gh_token" ]]; then
                     export MISE_GITHUB_TOKEN="$gh_token"
                     ok "GitHub token obtained via gh"
                 else
-                    warn "gh authentication did not complete."
+                    warn "gh login did not complete."
                 fi
             fi
         fi
-        # Still nothing? Offer a paste. This works with no gh AND no working API:
-        # you create the PAT in a browser elsewhere and paste it here.
         if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
-            warn "Create a no-scope token at https://github.com/settings/tokens"
-            read -rsp "Paste a GitHub token now (hidden; blank to skip): " a || a=""
-            echo
-            if [[ -n "$a" ]]; then
-                export MISE_GITHUB_TOKEN="$a"
-                ok "GitHub token set from your input"
-            else
-                warn "Continuing without a token (best effort). If tool installs fail,"
-                warn "re-run with GITHUB_TOKEN=ghp_... exported (no scopes needed)."
-            fi
+            warn "Continuing without a token (best effort). If a tool install is"
+            warn "rate-limited, re-run with GITHUB_TOKEN=ghp_... exported (no scopes)."
         fi
     fi
 else

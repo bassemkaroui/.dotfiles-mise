@@ -270,19 +270,39 @@ if [[ -f "$MISERC" ]]; then
     ok "~/.config/mise/miserc.toml already present: $(grep -E '^env' "$MISERC" || echo '(no env line)')"
 else
     PROFILES="${DOTFILES_PROFILES:-}"
-    if [[ -z "$PROFILES" && "$NONINTERACTIVE" != "1" ]]; then
-        echo "Available profiles: ${KNOWN_PROFILES[*]}"
-        read -rp "Profiles for this machine (comma/space-separated, empty = core only): " PROFILES || PROFILES=""
-    fi
     selected=()
-    # split on commas and/or whitespace
-    for p in ${PROFILES//,/ }; do
-        if [[ " ${KNOWN_PROFILES[*]} " == *" $p "* ]]; then
-            selected+=("$p")
+    if [[ -z "$PROFILES" && "$NONINTERACTIVE" != "1" ]]; then
+        # Numbered multi-select — typing exact profile names is error-prone.
+        printf '\n  Available profiles:\n\n'
+        for i in "${!KNOWN_PROFILES[@]}"; do
+            printf '    %2d) %s\n' "$((i + 1))" "${KNOWN_PROFILES[$i]}"
+        done
+        printf '\n  Numbers for this machine (space-separated), "all", or empty for core only:\n  > '
+        read -r PICKS || PICKS=""
+        if [[ "$PICKS" =~ ^[[:space:]]*[Aa][Ll][Ll][[:space:]]*$ ]]; then
+            selected=("${KNOWN_PROFILES[@]}")
         else
-            warn "Unknown profile '$p' — skipping (no config.$p.toml exists; mise would silently ignore it)"
+            for n in $PICKS; do
+                if [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#KNOWN_PROFILES[@]})); then
+                    prof="${KNOWN_PROFILES[$((n - 1))]}"
+                    # skip duplicates so `env = [...]` stays clean
+                    [[ " ${selected[*]} " == *" $prof "* ]] || selected+=("$prof")
+                else
+                    warn "Ignoring '$n' — not a number in 1-${#KNOWN_PROFILES[@]}"
+                fi
+            done
         fi
-    done
+    else
+        # Non-interactive / DOTFILES_PROFILES override: a name list, kept for
+        # automation. Split on commas and/or whitespace, validate against known.
+        for p in ${PROFILES//,/ }; do
+            if [[ " ${KNOWN_PROFILES[*]} " == *" $p "* ]]; then
+                selected+=("$p")
+            else
+                warn "Unknown profile '$p' — skipping (no config.$p.toml exists; mise would silently ignore it)"
+            fi
+        done
+    fi
     {
         echo "# Per-machine profile selection — see miserc.example.toml"
         if [[ ${#selected[@]} -gt 0 ]]; then

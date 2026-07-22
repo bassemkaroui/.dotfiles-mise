@@ -82,6 +82,15 @@ fi
 # Installing [tools] resolves aqua/github-backed tools through the GitHub
 # releases API (60 req/hr unauthenticated). The token must be exported HERE —
 # in the parent process of `mise bootstrap` — hooks and tasks run too late.
+#
+# mise times out each releases-API request after `fetch_remote_versions_timeout`
+# — as low as 3s on some builds — which is too tight for a cold container or a
+# slow uplink: every gh/ripgrep/fzf/… version lookup then "times out" and the
+# tool reports "no versions found". Give the whole bootstrap a more forgiving
+# budget; overridable, and it only sets a ceiling (a fast network still returns
+# immediately).
+export MISE_FETCH_REMOTE_VERSIONS_TIMEOUT="${MISE_FETCH_REMOTE_VERSIONS_TIMEOUT:-30s}"
+
 gh_cmd() {
     # Run gh even before [tools] are installed: fall back to a one-off
     # mise-managed gh (single API call, fits the unauthenticated budget).
@@ -112,9 +121,27 @@ if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
         warn "be rate-limited without one (60 req/hr)."
         read -rp "Authenticate with GitHub now (gh auth login)? [Y/n] " a || a=n
         if [[ ! "$a" =~ ^[Nn]$ ]]; then
-            gh_cmd auth login
-            MISE_GITHUB_TOKEN="$(gh_cmd auth token)"
-            export MISE_GITHUB_TOKEN
+            # Every step here is best-effort and MUST NOT abort the script. gh
+            # may not be installed, and installing it on the fly (gh_cmd's
+            # `mise exec gh@latest`) itself needs the GitHub API — exactly what
+            # is slow or unreachable on the machines most likely to lack a token
+            # (a fresh container, a throttled network). A failed auth attempt is
+            # not a reason to refuse to bootstrap: mise carries on unauthenticated
+            # (rate-limited, but the raised timeout above gives it a fair chance),
+            # and the user can drop in a token and re-run at any time. Guarding
+            # each command in the `if` condition keeps `set -e` from killing us.
+            gh_token=""
+            if gh_cmd auth login && gh_token="$(gh_cmd auth token 2>/dev/null)" \
+                && [[ -n "$gh_token" ]]; then
+                export MISE_GITHUB_TOKEN="$gh_token"
+                ok "GitHub token obtained via gh"
+            else
+                warn "Could not authenticate with gh — it may not have installed,"
+                warn "since that needs the GitHub API, which is slow/unreachable here."
+                warn "Continuing without a token (best effort). If tool installs fail,"
+                warn "export GITHUB_TOKEN=ghp_... (https://github.com/settings/tokens,"
+                warn "no scopes needed) and re-run this script."
+            fi
         else
             warn "Continuing without a token (best effort). If installs fail,"
             warn "export GITHUB_TOKEN=ghp_... (https://github.com/settings/tokens,"
@@ -325,11 +352,21 @@ fi
 # error and no backup (§2.26).
 backup_companion_targets() {
     [[ -n "${LINKED_DROPIN:-}" ]] || return 0
-    local target expanded bak n
+    local target expanded bak n old_hit
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
         expanded="${target/#\~/$HOME}"
         [[ -e "$expanded" && ! -L "$expanded" ]] || continue
+        # Self-guard, not just the caller's guard_old_repo: that one enumerates
+        # via `mise dotfiles status`, which can omit this drop-in's entries, so
+        # it may not have vetted this exact target. mv-ing a file that resolves
+        # into an old repo would move it INTO the rollback path, and applying
+        # would overwrite it there — the one thing this script must never do.
+        if old_hit="$(target_resolves_into_old_repo "$target")"; then
+            die "Companion target $target resolves into an old stow repo ($old_hit).
+       Unstow the old repo(s) first (MIGRATION.md step 3), then re-run — backing
+       this up would move a file into the rollback path."
+        fi
         bak="$expanded.pre-mise.bak"
         n=1
         while [[ -e "$bak" ]]; do bak="$expanded.pre-mise.bak$((n++))"; done
@@ -415,26 +452,52 @@ cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
 # up. Checking once would miss exactly those, and a stow *directory* symlink is
 # replaced by mise without a conflict error (a symlink is never data to mise),
 # i.e. silently.
+# The real, symlink-free paths of the old stow repos (each is the documented
+# rollback path for this migration).
+old_repo_reals() {
+    [[ -d "$OLD_REPO" ]] && (cd "$OLD_REPO" && pwd -P)
+    [[ -d "$OLD_CUSTOM_REPO" ]] && (cd "$OLD_CUSTOM_REPO" && pwd -P)
+}
+
+# Does <target> resolve, through its nearest existing ancestor, INTO an old
+# repo? Echoes the resolved old-repo path and returns 0 on a match; returns 1
+# otherwise. Shared by guard_old_repo and backup_companion_targets — the latter
+# needs its OWN check because it reads the companion's targets straight from the
+# TOML (not from `mise dotfiles status`, which is unreliable for a just-created
+# drop-in and can hide exactly the template-mode ~/.ssh/config that must never
+# be mv'd into the old repo).
+target_resolves_into_old_repo() {
+    local target="$1" expanded probe resolved r
+    expanded="${target/#\~/$HOME}"
+    # Walk up to the nearest existing ancestor: the symlink is usually a parent
+    # directory, not the target itself (which doesn't exist yet). `! -e && ! -L`
+    # so a BROKEN symlink stops the walk (‑e is false for a dangling link) —
+    # otherwise a stale stow symlink pointing into the old repo is stepped past
+    # and missed.
+    probe="$expanded"
+    while [[ ! -e "$probe" && ! -L "$probe" && "$probe" != "/" && "$probe" != "$HOME" ]]; do
+        probe="$(dirname "$probe")"
+    done
+    resolved="$(readlink -f "$probe" 2>/dev/null || true)"
+    [[ -n "$resolved" ]] || return 1
+    while IFS= read -r r; do
+        [[ -n "$r" ]] || continue
+        [[ "$resolved" == "$r"/* ]] && {
+            printf '%s' "$resolved"
+            return 0
+        }
+    done < <(old_repo_reals)
+    return 1
+}
+
 guard_old_repo() {
     [[ -d "$OLD_REPO" || -d "$OLD_CUSTOM_REPO" ]] || return 0
-    local old_reals=() conflicts=() target expanded probe resolved r
-    [[ -d "$OLD_REPO" ]] && old_reals+=("$(cd "$OLD_REPO" && pwd -P)")
-    [[ -d "$OLD_CUSTOM_REPO" ]] && old_reals+=("$(cd "$OLD_CUSTOM_REPO" && pwd -P)")
-
+    local conflicts=() target resolved
     while IFS= read -r target; do
         [[ -n "$target" ]] || continue
-        expanded="${target/#\~/$HOME}"
-        # Walk up to the nearest existing ancestor: the symlink is usually a
-        # parent directory, not the target itself (which doesn't exist yet).
-        probe="$expanded"
-        while [[ ! -e "$probe" && "$probe" != "/" && "$probe" != "$HOME" ]]; do
-            probe="$(dirname "$probe")"
-        done
-        resolved="$(readlink -f "$probe" 2>/dev/null || true)"
-        [[ -n "$resolved" ]] || continue
-        for r in "${old_reals[@]}"; do
-            [[ "$resolved" == "$r"/* ]] && conflicts+=("$target -> $resolved")
-        done
+        if resolved="$(target_resolves_into_old_repo "$target")"; then
+            conflicts+=("$target -> $resolved")
+        fi
     done < <(
         # [dotfiles] targets …
         { mise dotfiles status --json 2>/dev/null || true; } \
@@ -475,7 +538,7 @@ for r in data if isinstance(data, list) else []:
     )
 
     if ((${#conflicts[@]})); then
-        warn "These paths currently resolve INTO an old stow repo (${old_reals[*]}):"
+        warn "These paths currently resolve INTO an old stow repo ($(old_repo_reals | paste -sd' ' -)):"
         for target in "${conflicts[@]}"; do warn "    $target"; done
         die "Unstow the old repo(s) first (MIGRATION.md step 3), then re-run this script.
        Applying now would rewrite files inside them — the rollback path.
@@ -491,8 +554,6 @@ if [[ -d "$OLD_REPO" || -d "$OLD_CUSTOM_REPO" ]] && ! command -v python3 &>/dev/
       unstow the old repo and re-run with DOTFILES_OLD_REPO=/nonexistent."
 fi
 guard_old_repo
-# Safe only now: the guard above has proven no target resolves into an old repo.
-backup_companion_targets
 
 # Also runs twice, for the same reason as guard_old_repo: under
 # MISE_GLOBAL_CONFIG_FILE the profile files' entries are invisible, so a
@@ -560,6 +621,12 @@ mise trust "$CONF/config.toml" >/dev/null 2>&1 || true
 # Second look, now that the profile files are loaded: their [dotfiles] entries
 # were invisible above, and pass 2 is what applies them.
 guard_old_repo
+# Back up what the companion is about to overwrite, HERE — after the var is
+# unset (so the drop-in is fully visible) and after guard_old_repo, and right
+# before pass 2 applies it. Pass 1 (--only dotfiles under MISE_GLOBAL_CONFIG_FILE)
+# never applies the companion, so nothing was at risk earlier; pass 2 does, and
+# backup_companion_targets self-guards against the old repo besides.
+backup_companion_targets
 backup_conflicts
 
 # ── 7b. Repo health ───────────────────────────────────────────────────────────

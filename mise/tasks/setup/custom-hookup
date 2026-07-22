@@ -260,6 +260,11 @@ fi
 # it a second time when the chmod ran AFTER the apply: the target kept the
 # clone's 0664 while the source became 0600, which is the same mismatch with
 # the operands swapped. It has to happen BEFORE mise renders anything.
+# mkdir before chmod: in the bootstrap chain the pre-dotfiles hook already made
+# ~/.ssh 0700, but this task is reachable standalone (see the header), where at
+# umask 002 a chmod of a missing dir no-ops and `mise dotfiles apply` then
+# creates ~/.ssh at 0775 — group-writable, which ssh rejects.
+mkdir -p "$HOME/.ssh" 2>/dev/null || true
 chmod 700 "$HOME/.ssh" 2>/dev/null || true
 if have python3 && [[ -f "$REPO/scripts/dotfiles-targets.py" ]]; then
     while IFS=$'\t' read -r target source; do

@@ -510,8 +510,14 @@ try:
     data = json.loads(raw)
 except json.JSONDecodeError:
     sys.exit(0)
+# Defensive: a non-dict payload or a file entry missing "target" must not throw
+# — an exception here runs inside <(…), so it is swallowed and SILENTLY DISABLES
+# the guard (the sibling repos branch already guards its shape; match it).
+if not isinstance(data, dict):
+    sys.exit(0)
 for f in data.get("files", []):
-    print(f["target"])
+    if isinstance(f, dict) and f.get("target"):
+        print(f["target"])
 '
         # … and [bootstrap.repos] paths, which are cloned/fetched in an EARLIER
         # bootstrap step than dotfiles. ~/.tmux is a stow symlink into the old
@@ -576,12 +582,18 @@ try:
     data = json.loads(raw)
 except json.JSONDecodeError:
     sys.exit(0)
+# This pipeline runs in the FOREGROUND under `set -euo pipefail`, so an
+# exception would abort install.sh mid-backup. Guard the shape.
+if not isinstance(data, dict):
+    sys.exit(0)
 for f in data.get("files", []):
+    if not isinstance(f, dict):
+        continue
     # Any mode, not just symlink. A template-mode entry OVERWRITES a
     # pre-existing real file silently — no error, no backup (verified
     # 2026-07-20 against ~/.ssh/config) — where symlink mode at least
     # refuses. Backing up every differing target is the only defence.
-    if f.get("state") == "differs":
+    if f.get("state") == "differs" and f.get("target"):
         print(f["target"])
 ' \
         | while IFS= read -r target; do

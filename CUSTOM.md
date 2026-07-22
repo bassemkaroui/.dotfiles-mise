@@ -85,14 +85,22 @@ A file that differs per machine is **one** template branching on the profiles in
 ```
 
 ```jinja
-{% if "laptop" in mise_env %}
+{% if mise_env is defined and "laptop" in mise_env %}
 …laptop hosts…
-{% elif "desktop" in mise_env %}
+{% elif mise_env is defined and "desktop" in mise_env %}
 …desktop hosts…
 {% else %}
 …the tag-default equivalent…
 {% endif %}
 ```
+
+**The `mise_env is defined` guard is mandatory, not decoration.** On a machine
+that selected no profiles — `env = []`, the shipped default — `mise_env` is
+*undefined*, not an empty array, and `"laptop" in mise_env` on undefined is a
+hard render error (`` `in` cannot be used on a container of type `undefined` ``).
+A template that fails to render aborts the **entire** `mise dotfiles apply` —
+every other dotfile with it, machine-wide (verified 2026-07-22). Guard every
+`in mise_env` test.
 
 `templates/ssh_config.tmpl.example` in this repo documents the mechanism.
 

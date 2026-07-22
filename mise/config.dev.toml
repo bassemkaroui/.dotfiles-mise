@@ -1,6 +1,7 @@
 # Profile: dev — dev/build/secrets tooling (old conf.d/dev.toml)
-# corepack activation (`corepack enable`) runs as a gated step in the bootstrap
-# task (Phase 3) — hooks can't see profiles.
+# corepack activation (`corepack enable`) runs in the [bootstrap.hooks.post-tools]
+# hook in config.toml, guarded on `command -v corepack` (the hook can't see
+# profiles, so it self-gates on corepack being present).
 [tools]
 # uv moved to core config.toml on 2026-07-21: `pipx:urlscan` is a core tool and
 # mise's pipx backend uses uv when present, so uv is no longer optional.

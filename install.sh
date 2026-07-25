@@ -57,7 +57,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # libcurl-gnutls. That combination drops large packs mid-transfer on some
 # networks: `RPC failed; curl 56 GnuTLS recv error (-24)`, `early EOF`,
 # `fetch-pack: invalid index-pack output`. A failing clone aborts the ENTIRE
-# bootstrap (§2.28), so a fresh install dies at step 2 with nothing deployed.
+# bootstrap, so a fresh install dies at step 2 with nothing deployed.
 #
 # Measured on the author's network (2026-07-21), cloning oh-my-zsh:
 #   /usr/bin/git (libcurl-gnutls), HTTP/2 default → fails
@@ -322,7 +322,7 @@ fi
 # ── 4a. python3 is a hard requirement ─────────────────────────────────────────
 # Not a nicety: three safety nets are written in it — the old-repo guard, the
 # conflict backup (the only thing standing between a template-mode entry and a
-# real ~/.ssh/config, §2.26) and the collision lint. Skipping them silently on a
+# real ~/.ssh/config) and the collision lint. Skipping them silently on a
 # host without python3 is how a "successful" install eats a file. Every
 # Debian-family system this repo targets ships it.
 command -v python3 &>/dev/null \
@@ -338,7 +338,7 @@ command -v python3 &>/dev/null \
 # AFTER everything below: the collision lint, the old-repo guard and the
 # conflict backup would all be blind to the companion's entries on the run that
 # first deploys them. Since ~/.ssh/config is a template-mode entry, and template
-# mode overwrites a pre-existing real file silently (§2.26), that blindness
+# mode overwrites a pre-existing real file silently, that blindness
 # costs a real file. Link it here when the clone already exists, so the normal
 # step-4 apply deploys it under the protection of all three checks;
 # setup:custom-hookup stays the fallback for a companion cloned later.
@@ -379,7 +379,7 @@ fi
 # repeated sandbox runs of setup:custom-hookup, where status omitted the new
 # entries while the apply moments later honoured them — and the entry it would
 # miss is the template-mode ~/.ssh/config, which overwrites a real file with no
-# error and no backup (§2.26).
+# error and no backup.
 backup_companion_targets() {
     [[ -n "${LINKED_DROPIN:-}" ]] || return 0
     local target expanded bak n old_hit
@@ -433,7 +433,7 @@ run_lint || {
 run_lint --live || {
     # A drop-in THIS RUN created, that then fails the lint, must not be left
     # behind: an entry with a missing source aborts every later `mise
-    # dotfiles apply` on the machine, main repo included (§2.16). Only
+    # dotfiles apply` on the machine, main repo included. Only
     # unlink what we linked — never a file the user placed by hand.
     if [[ -n "${LINKED_DROPIN:-}" && -L "$LINKED_DROPIN" ]]; then
         rm -f "$LINKED_DROPIN"
@@ -477,7 +477,7 @@ cd "$HOME" # keep any project-local mise.toml in the caller's cwd out of scope
 # than merely documented.
 #
 # Called TWICE: once here (only config.toml is visible — MISE_GLOBAL_CONFIG_FILE
-# restricts mise to that one file, §2.12) and again after it is unset, when the
+# restricts mise to that one file) and again after it is unset, when the
 # profile files' entries — ~/.config/yazi, ~/.config/ghostty/* — finally show
 # up. Checking once would miss exactly those, and a stow *directory* symlink is
 # replaced by mise without a conflict error (a symlink is never data to mise),
@@ -595,7 +595,7 @@ guard_old_repo
 # MISE_GLOBAL_CONFIG_FILE the profile files' entries are invisible, so a
 # pre-existing real ~/.config/yazi would never be backed up and pass 2 would
 # die on the conflict — recommending --force, the one flag that is never safe
-# here (§2.13).
+# here.
 backup_conflicts() {
     command -v python3 &>/dev/null || return 0
     # `|| true`: a status failure must not kill the script via pipefail — the

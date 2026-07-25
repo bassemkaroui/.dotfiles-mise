@@ -88,9 +88,9 @@ jq = "latest"
 "~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" = { url = "https://github.com/zsh-users/zsh-syntax-highlighting.git" }
 "~/.oh-my-zsh/custom/plugins/fzf-tab" = { url = "https://github.com/Aloxaf/fzf-tab.git" }
 "~/.oh-my-zsh/custom/themes/powerlevel10k" = { url = "https://github.com/romkatv/powerlevel10k.git" }
-# oh-my-tmux (was a git submodule); its tmux.conf is wired up in Phase 2
+# oh-my-tmux (was a git submodule); its tmux.conf is wired up by setup:repo-links
 "~/.tmux" = { url = "https://github.com/gpakosz/.tmux.git", ref = "master" }
-# PathPicker (fpp); the ~/.local/bin/fpp symlink task lands in Phase 3
+# PathPicker (fpp); the ~/.local/bin/fpp symlink is created by setup:repo-links
 "~/.local/opt/PathPicker" = { url = "https://github.com/facebook/PathPicker.git" }
 
 # ── Hooks ─────────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ run = [
 
 # ── Login shell ───────────────────────────────────────────────────────────────
 # NO [bootstrap.user] SECTION, deliberately. It runs exactly one command,
-# `chsh -s <shell>` (§2.19), which PAM-prompts and therefore FAILS on every
+# `chsh -s <shell>`, which PAM-prompts and therefore FAILS on every
 # unattended run — and a failing bootstrap step aborts everything after it
 # (verified 2026-07-20: the `user` step precedes `task`, so the whole
 # [tasks.bootstrap] tail, install.sh included, dies with rc=1). The step meant
@@ -167,7 +167,7 @@ run = [
 #
 # setup:login-shell-fallback owns the login shell instead: sudo chsh → sudo
 # usermod → interactive chsh → `exec zsh` in ~/.bash_profile, each rung tried
-# only where it can work. See §2.27 of the plan.
+# only where it can work.
 
 # ── Dotfiles ──────────────────────────────────────────────────────────────────
 # Sourceless entries mirror the target path under dotfiles.root (home/).

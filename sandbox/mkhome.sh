@@ -14,7 +14,7 @@
 # --two-pass mirrors install.sh's real first run: link the config family with
 # `bootstrap --only dotfiles` under MISE_GLOBAL_CONFIG_FILE, then drop the
 # variable. WITHOUT it the sandbox can only ever see CORE entries — the
-# variable suppresses config.<profile>.toml (§2.12), so a profile-specific
+# variable suppresses config.<profile>.toml, so a profile-specific
 # assertion made in single-pass mode silently passes for the wrong reason.
 #
 # The sandbox mirrors the real first-run flow: ~/.config/mise is a real
@@ -57,7 +57,7 @@ done
 # that silently point the sandbox back at the REAL config: MISE_TRUSTED_CONFIG_PATHS
 # is set to ~/.config/mise on the author's machine, which would make every
 # sandbox inherit trust it should have had to establish itself — exactly the
-# class of behaviour (§2.10) this harness exists to reproduce.
+# class of behaviour this harness exists to reproduce.
 unset MISE_TRUSTED_CONFIG_PATHS MISE_GLOBAL_CONFIG_FILE MISE_CONFIG_DIR MISE_ENV \
     MISE_DATA_DIR MISE_STATE_DIR MISE_CACHE_DIR
 

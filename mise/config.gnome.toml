@@ -14,12 +14,11 @@
 "apt:dconf-cli" = "latest"
 
 # No [dotfiles] here. The old repo's `gnome_themes` package vendored two GTK
-# themes (WhiteSur-dark, ChromeOS-dark-compact — 582 files, 4.5 MB) and this
-# repo carried them through Phase 4. They are dropped as of session C, by user
-# decision once this repo was declared PUBLIC-intended: every machine using it
-# should end up the same, a vendored third-party theme tree is not something a
-# public repo should redistribute, and the themes only ever applied on the
-# `gnome` profile. Install them from upstream if you want them:
+# themes (WhiteSur-dark, ChromeOS-dark-compact — 582 files, 4.5 MB); they are
+# deliberately not vendored here, because this repo is intended to be public:
+# every machine using it should end up the same, a vendored third-party theme
+# tree is not something a public repo should redistribute, and the themes only
+# ever applied on the `gnome` profile. Install them from upstream if you want them:
 #
 #   WhiteSur-dark          https://github.com/vinceliuice/WhiteSur-gtk-theme
 #   ChromeOS-dark-compact  a GNOME-Look/ChromeOS GTK theme

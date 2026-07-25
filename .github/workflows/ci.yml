@@ -63,7 +63,7 @@ jobs:
           curl -fsSL https://mise.run | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # --two-pass on BOTH of these, not just the assertion step below.
-      # MISE_GLOBAL_CONFIG_FILE suppresses config.<profile>.toml (§2.12), so a
+      # MISE_GLOBAL_CONFIG_FILE suppresses config.<profile>.toml, so a
       # single-pass run resolves CORE ONLY — which made four of the five matrix
       # arms byte-identical to the core arm: `dotfiles apply --dry-run` hashed
       # the same for "", "graphical,gnome,laptop" and "ai,dev,yazi,neovim,media".
@@ -74,7 +74,7 @@ jobs:
         run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
       - name: Profile-specific entries appear only with their profile
         # --two-pass is REQUIRED here: MISE_GLOBAL_CONFIG_FILE suppresses
-        # config.<profile>.toml (§2.12), so a single-pass sandbox shows core
+        # config.<profile>.toml, so a single-pass sandbox shows core
         # entries only and this assertion would pass for the wrong reason.
         run: |
           set -euo pipefail
@@ -127,7 +127,7 @@ jobs:
       - name: The sandbox must not have written into the repo
         # sandbox/mkhome.sh symlinks the REAL repo into the fake $HOME, so
         # anything that writes "into ~/.dotfiles-mise" lands in the working
-        # tree. §5 states the harness must never do that, but only the e2e job
+        # tree. By design the harness must never do that, but only the e2e job
         # checked it — and that job runs against a `cp -a` copy, so the property
         # was never actually tested where it can fail.
         run: |
@@ -143,7 +143,7 @@ jobs:
   #
   # CI cannot clone the author's private companion — GITHUB_TOKEN is scoped to
   # this repo — so the fixture is built in the job. It is also where the
-  # §2.26 regression (template mode silently overwriting a real ~/.ssh/config)
+  # template-mode regression (silently overwriting a real ~/.ssh/config)
   # is asserted.
   e2e:
     name: end-to-end (ubuntu:24.04, non-root)
@@ -215,7 +215,7 @@ jobs:
           "~/.ssh/config" = { source = "~/.dotfiles-custom-mise/templates/ssh_config.tmpl", mode = "template" }
           EOF
           # A pre-existing REAL ~/.ssh/config: template mode overwrites one
-          # silently (§2.26), so install.sh must back it up first.
+          # silently, so install.sh must back it up first.
           mkdir -p /home/tester/.ssh
           printf 'Host precious\n  HostName 203.0.113.9\n' > /home/tester/.ssh/config
           chmod 700 /home/tester/.ssh
@@ -296,21 +296,21 @@ jobs:
             [[ "$(git config --get user.email)" == "tester@example.invalid" ]] \
               || err "git identity not resolved through the [include] chain"
 
-            # --- §2.26: the template-mode entry must not eat a real file ---
+            # --- template mode must not eat a real file ---
             [[ -f "$HOME/.ssh/config.pre-mise.bak" ]] || err "pre-existing ~/.ssh/config was NOT backed up"
             [[ "$(sha256sum "$HOME/.ssh/config.pre-mise.bak" | cut -d" " -f1)" == "$(cat /tmp/precious.sha)" ]] \
               || err "~/.ssh/config backup does not match the original"
             grep -q "laptop.example.invalid" "$HOME/.ssh/config" || err "ssh template did not render the laptop branch"
             [[ "$(stat -c %a "$HOME/.ssh/config")" == "600" ]] || err "rendered ~/.ssh/config is not mode 600"
 
-            # --- login shell: the two defects CI exists to catch (session A, M5) ---
+            # --- login shell: the two defects CI exists to catch ---
             out="$(bash --login -c "echo LOGIN_OK" </dev/null)"
             [[ "$out" == *LOGIN_OK* ]] || err "bash --login -c no longer runs its command (exec zsh regression)"
 
             # --- an interactive zsh must start clean on a fresh machine ---
             # Under a PTY, not `zsh -ic … </dev/null`: without a terminal zsh
             # cannot enable zle and exits non-zero with "can\x27t change option:
-            # zle", which says nothing about the config. This is plan §2.22\x27s
+            # zle", which says nothing about the config. This is the
             # lesson — measure interactivity from a real pty — and CI walked
             # straight into it on its first run.
             # The TRANSCRIPT goes to a real file, not /dev/null: everything zsh
@@ -325,7 +325,7 @@ jobs:
               err "interactive zsh printed errors on startup"
             fi
 
-            # --- M2: nothing may write into the repo working tree ---
+            # --- nothing may write into the repo working tree ---
             dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain)"
             [[ -z "$dirty" ]] || { echo "$dirty"; err "install.sh wrote into the repo working tree"; }
 
@@ -340,7 +340,7 @@ jobs:
         # status shows a permanent phantom error. The identical bug was found
         # and fixed in .zshrc (8baf469) precisely because CI smoke-tested zsh.
         #
-        # A pty is mandatory (§2.22) and the transcript goes to a real file, for
+        # A pty is mandatory and the transcript goes to a real file, for
         # the same two reasons documented on the zsh check.
         run: |
           set -euo pipefail
@@ -475,7 +475,7 @@ jobs:
           probe "a [tools] key the core config already declares" \
             '[tools]
           ripgrep = "latest"'
-          probe "a ~/.config/mise/** target outside config.toml (D9a)" \
+          probe "a ~/.config/mise/** target outside config.toml (self-management)" \
             '[dotfiles]
           "~/.config/mise/conf.d/evil.toml" = { source = "/etc/hostname", mode = "symlink" }'
           # The drop-in must be gone whatever happened, or later steps inherit it.

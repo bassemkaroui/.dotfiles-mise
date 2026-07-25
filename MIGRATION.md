@@ -79,7 +79,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - **Most of `install:build-deps`.** The old task installed `autoconf automake libtool clang
   libclang-dev nasm yasm libjpeg/png/tiff/webp/freetype/fontconfig/ltdl-dev python3-pip
   libssl-dev libevent-dev libncurses-dev perl` — a source-build toolchain for the stow and zsh
-  fallbacks (both dropped, D7) and for compiling ffmpeg/imagemagick (now apt packages in the
+  fallbacks (both dropped) and for compiling ffmpeg/imagemagick (now apt packages in the
   `media` profile). What survives is `build-essential` + `pkg-config`, which is what the `cargo:`
   backend needs. If a tool later fails to build for want of `libssl-dev` or `libclang-dev`, add
   it back to `[bootstrap.packages]` — that is the intended repair, not a regression.

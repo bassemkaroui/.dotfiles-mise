@@ -9,7 +9,7 @@ drop-in that was created moments earlier proved unreliable — in repeated
 sandbox runs it omitted the new entries while the `dotfiles apply` immediately
 afterwards honoured them. The entry that gets missed is the template-mode
 `~/.ssh/config`, and template mode replaces a pre-existing real file with no
-error and no backup (plan §2.26). Reading the file we just linked has no such
+error and no backup. Reading the file we just linked has no such
 race.
 
 With --with-source it prints `target<TAB>source` instead, which the caller uses

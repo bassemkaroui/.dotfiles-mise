@@ -6,7 +6,7 @@
 #   source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #
 # The relative path resolves through ~/.config/mise/tasks, which is a symlink
-# to this repo's mise/tasks (D1a self-management), so it works both from the
+# to this repo's mise/tasks (self-management), so it works both from the
 # repo and from a deployed machine. Files in lib/ are deliberately NOT
 # executable: mise lists an executable file under tasks/lib/ as a task
 # (`lib:foo` — verified), a non-executable one it ignores.

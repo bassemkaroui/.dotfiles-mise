@@ -121,7 +121,7 @@ run = [
 # idempotent, and each gates itself on $MISE_ENV where it needs to (tasks DO
 # see it, hooks do not).
 #
-# ORDER MATTERS, and not the way the plan first assumed: a step that exits
+# ORDER MATTERS: a step that exits
 # non-zero ABORTS the rest of the chain and fails `mise bootstrap` with its
 # code (verified 2026-07-20). So the steps every machine needs run FIRST, and
 # the optional installs — which depend on the network, on sudo, and on
@@ -173,7 +173,7 @@ run = [
 # Sourceless entries mirror the target path under dotfiles.root (home/).
 # ~/.config/completions is NOT managed: .zshrc creates it and generates into it.
 [dotfiles]
-# mise's own config (D1a). Sources MUST be absolute (~/... counts): a relative
+# mise's own config (self-managed). Sources MUST be absolute (~/... counts): a relative
 # source would resolve against the declaring file's directory, which after
 # linking is ~/.config/mise — i.e. self-referential entries that never pick up
 # repo changes. The glob is config*.toml, not *.toml, so miserc.example.toml
@@ -206,12 +206,12 @@ run = [
 # normal entry. ~/.config/tmux/plugins/ stays unmanaged (tpm writes there).
 "~/.config/tmux/tmux.conf.local" = { mode = "symlink" }
 
-# GitHub CLIs. D8: only our config is managed — hosts.yml (OAuth token) and
+# GitHub CLIs. Only our config is managed — hosts.yml (OAuth token) and
 # state.yml must never be captured into the repo.
 "~/.config/gh/config.yml" = { mode = "symlink" }
 "~/.config/gh-dash/config.yml" = { mode = "symlink" }
 
-# Claude Code. D8: per-file, never a whole-dir link — ~/.claude also holds
+# Claude Code. Per-file, never a whole-dir link — ~/.claude also holds
 # credentials, project history and local state. commands/ is symlink-each so
 # machine-local commands can live alongside the managed ones.
 "~/.claude/settings.json" = { mode = "symlink" }
@@ -229,7 +229,7 @@ run = [
 # Git. The shareable half only: ~/.gitconfig ends with [include]s for
 # ~/.gitconfig.identity (name/email) and ~/.gitconfig.local (signing key),
 # neither of which this repo ships — they come from the private companion repo
-# and from setup:git-signing (D12). git ignores a missing include, so a machine
+# and from setup:git-signing. git ignores a missing include, so a machine
 # without either still has a working git.
 #
 # symlink, deliberately — but with a caveat worth knowing (see the header of
@@ -249,7 +249,7 @@ run = [
 "~/.config/ruff/ruff.toml" = { mode = "symlink" }
 "~/.config/hunk/config.toml" = { mode = "symlink" }
 
-# GPG. D8: only the agent config — keyrings stay out of the repo. mise creates
+# GPG. Only the agent config — keyrings stay out of the repo. mise creates
 # missing parent dirs with the process umask (0755/0775 observed), and gpg
 # refuses to use a group/world-readable ~/.gnupg, so the pre-dotfiles hook
 # below creates it 0700 first.

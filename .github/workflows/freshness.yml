@@ -7,8 +7,8 @@ name: Repo freshness
 # in this repo. So this job is a NOTIFIER, not a PR bot.
 #
 # What it watches (scripts/check-repos.py):
-#   - a URL that no longer resolves — renamed, deleted or made private. Per
-#     §2.28 a failing clone aborts the ENTIRE bootstrap at step 2, so this
+#   - a URL that no longer resolves — renamed, deleted or made private. A
+#     failing clone aborts the ENTIRE bootstrap at step 2, so this
 #     breaks every fresh install, silently, until someone tries one.
 #   - a `ref` that is no longer a branch or tag on the remote — same blast
 #     radius, and invisible on machines that already cloned it.

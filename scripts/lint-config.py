@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collision lint for the mise config family (plan decisions D9/D9a).
+"""Collision lint for the mise config family (one-key-one-file + self-management).
 
 mise's precedence between sibling config files (config.toml, config.<env>.toml,
 config.local.toml, conf.d/*.toml) proved inconsistent on 2026.7.7 — same-key
@@ -14,7 +14,7 @@ Checked namespaces (each key must appear in at most one file):
   - [vars] keys
   - [tasks.*] names
 
-Also enforced (D9a): mise's own config is self-managed by exactly two entries in
+Also enforced: mise's own config is self-managed by exactly two entries in
 config.toml; no other file may declare a ~/.config/mise/** dotfiles target.
 
 Modes:
@@ -61,7 +61,7 @@ NAMESPACES = [
     # A profile file (or a companion drop-in) redeclaring a hook silently
     # REPLACES it by undefined precedence rather than adding to it. The one in
     # config.toml creates ~/.gnupg and ~/.ssh at 0700 before the dotfiles step;
-    # losing it means gpg refuses its homedir and ssh refuses its config (§2.17)
+    # losing it means gpg refuses its homedir and ssh refuses its config
     # — with no error from mise at any point.
     "bootstrap.hooks",
     "tools",
@@ -82,7 +82,7 @@ def flatten_settings(data: dict, prefix: str = "") -> dict:
     """[settings] as dotted leaf keys, for the one-key-one-file rule.
 
     Every setting is a singleton, not just dotfiles.root: two files declaring
-    the same one are resolved by mise's inconsistent sibling precedence (§2.2)
+    the same one are resolved by mise's inconsistent sibling precedence
     and the loser is silent. dotfiles.root is merely the most destructive case
     — the loser's sourceless entries resolve under the winner's root and are
     reported as "source missing", which aborts every apply.
@@ -100,7 +100,7 @@ def flatten_settings(data: dict, prefix: str = "") -> dict:
     return flat
 
 
-# D9a: the only permitted self-management entries, and their only permitted home.
+# The only permitted self-management entries, and their only permitted home.
 SELF_MANAGED_KEYS = {
     "~/.config/mise/config*.toml",
     "~/.config/mise/tasks",
@@ -139,7 +139,7 @@ def is_self_managed_key(key: str) -> bool:
 
 
 def check_self_managed(path: str, rel: str, data: dict, problems: list[str]) -> None:
-    """D9a — only config.toml may manage ~/.config/mise/** targets."""
+    """Self-management — only config.toml may manage ~/.config/mise/** targets."""
     for key in extract("dotfiles", data):
         if not is_self_managed_key(key):
             continue
@@ -147,12 +147,12 @@ def check_self_managed(path: str, rel: str, data: dict, problems: list[str]) -> 
             os.path.dirname(path)
         ) != os.path.realpath(MISE_DIR):
             problems.append(
-                f"D9a: [dotfiles] {key!r} in {rel} — only the repo's {SELF_MANAGED_OWNER} may "
+                f"self-management: [dotfiles] {key!r} in {rel} — only the repo's {SELF_MANAGED_OWNER} may "
                 f"manage ~/.config/mise/** targets"
             )
         elif key not in SELF_MANAGED_KEYS:
             problems.append(
-                f"D9a: [dotfiles] {key!r} in {rel} is an unexpected ~/.config/mise/** "
+                f"self-management: [dotfiles] {key!r} in {rel} is an unexpected ~/.config/mise/** "
                 f"target (expected exactly {sorted(SELF_MANAGED_KEYS)})"
             )
 
@@ -176,7 +176,7 @@ def check_relative_sources(rel: str, data: dict, problems: list[str]) -> None:
 
     dotfiles.md: "Relative explicit sources resolve against the directory of
     the config file that declares the entry." Every file in this family is
-    loaded from ~/.config/mise (config*.toml, linked there by the D9a
+    loaded from ~/.config/mise (config*.toml, linked there by the
     self-management entries) or from ~/.config/mise/conf.d (a companion
     drop-in) — never from the repo — so a relative source silently points at
     mise's own config directory instead of at the repo.
@@ -185,7 +185,7 @@ def check_relative_sources(rel: str, data: dict, problems: list[str]) -> None:
     them fine, which is the one answer that is wrong in both modes. Verified:
     `"~/.myrc" = { source = "miserc.example.toml" }` in mise/config.toml linted
     OK and deployed as `~/.myrc -> ~/.config/mise/miserc.example.toml  source
-    missing` — and per §2.16 a missing explicit source aborts the ENTIRE apply,
+    missing` — and a missing explicit source aborts the ENTIRE apply,
     every other dotfile with it.
     """
     for key, value in extract("dotfiles", data).items():
@@ -294,7 +294,7 @@ def check_repo_sources(rel: str, data: dict, problems: list[str], live: bool = F
                 # check this repo has. Verified: `source =
                 # "/opt/definitely-not-here/somerc"` in config.graphical.toml
                 # linted OK, passed both sandbox arms and `dotfiles status`
-                # rc=0, and only failed on a real apply — where, per §2.16, it
+                # rc=0, and only failed on a real apply — where it
                 # takes every other dotfile down with it.
                 #
                 # It is also a design rule (README): no source may point at
@@ -428,7 +428,7 @@ def main() -> int:
                 else:
                     seen[ident] = rel
 
-        # D9a applies in both modes — machine-local drop-ins are the least
+        # Self-management applies in both modes — machine-local drop-ins are the least
         # reviewed files on the box, so they get the same check.
         check_self_managed(path, rel, data, problems)
         # Both modes: a relative source and an unknown mode are wrong wherever
@@ -453,7 +453,7 @@ def main() -> int:
         if core_data or not any(p.startswith("PARSE ERROR") for p in problems):
             for missing in SELF_MANAGED_KEYS - declared:
                 problems.append(
-                    f"D9a: {SELF_MANAGED_OWNER} is missing the self-management entry "
+                    f"self-management: {SELF_MANAGED_OWNER} is missing the self-management entry "
                     f"{missing!r} — without it the repo's config never links into "
                     f"~/.config/mise"
                 )
@@ -462,7 +462,7 @@ def main() -> int:
             source = value.get("source") if isinstance(value, dict) else value
             if not isinstance(source, str) or not source.startswith(("~/", "/")):
                 problems.append(
-                    f"D9a: [dotfiles] {key!r} needs an absolute source (~/... or /...); "
+                    f"self-management: [dotfiles] {key!r} needs an absolute source (~/... or /...); "
                     f"a relative one resolves against ~/.config/mise once linked, making "
                     f"the entry self-referential. Got: {source!r}"
                 )

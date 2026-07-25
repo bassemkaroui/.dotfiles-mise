@@ -4,45 +4,45 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 
 ## Capability map (old → new)
 
-| Old | New | Phase |
-|---|---|---|
-| ~~`mise run init` + `bootstrap` task chain~~ ✅ | `install.sh` → `mise bootstrap` → `[tasks.bootstrap]` | 0–3 |
-| ~~Stow packages `bash zsh p10k`~~ ✅ | `[dotfiles]` core entries | 1 |
-| ~~Stow packages `fzf bat tmux gh gh-dash claude ruff hunk gpg yazi`~~ ✅ | `[dotfiles]` core entries (+ `yazi` profile) | 2 |
-| ~~Stow package `ghostty` (config only)~~ ✅ | `graphical` profile `[dotfiles]` | 2 |
-| ~~Stow package `nvim`~~ ✅ | `neovim` profile `[bootstrap.repos]` | 1 |
-| ~~Stow package `gnome_themes` (+DE auto-exclude)~~ ✅ | **dropped in session C** — see below; the `gnome` profile now carries only `apt:dconf-cli` and the extension tasks | 4, 6 |
-| ~~Stow package `mise` (nested stow)~~ ✅ | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` | 0, 1.5 |
-| ~~conf.d tool groups (`runtime cli dev ai yazi neovim`)~~ ✅ | core `[tools]` + profile files | 1–2 |
-| ~~`.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + their picker tasks~~ ✅ | `mise/miserc.toml` profiles | 0 |
-| ~~tag-default→tag-X fallback~~ ✅ | template-mode entries on `mise_env`; the companion's `ssh/tag-{laptop,desktop}` is now ONE template | 2, 6 |
-| ~~oh-my-zsh installer, plugin/p10k/fzf-tab clones~~ ✅ | `[bootstrap.repos]` | 1 |
-| ~~oh-my-tmux + nvim git **submodules**~~ ✅ | `[bootstrap.repos]` (real clones at live paths) | 2 |
-| ~~`install:pathpicker`~~ ✅ | `[bootstrap.repos]` + `setup:repo-links` task | 2–3 |
-| ~~`setup:nodes-tools` (corepack enable)~~ ✅ | `post-tools` hook, guarded on `command -v corepack` | 3a |
-| ~~`setup:p10k-icon` (writes `~/.p10k.local.zsh`)~~ ✅ | ported, with a shortlist menu + `--icon`/`--show`/`--clear`; asks at most once per machine | 6 |
-| ~~Custom repo's `p10k/tag-desktop/.p10k.zsh`~~ ✅ | **dropped** — it differed from the shared config by exactly one line (the OS icon), which `setup:p10k-icon` now writes into the machine-local overlay. Removes the two-repos-one-key hazard | 6 |
-| ~~`install:build-deps`, `install:nala`, zsh install~~ ✅ (narrowed — see below) | `[bootstrap.packages]` apt entries | 1 |
-| ~~`install:media-tools`~~ ✅ | `media` profile apt entries (ubi fallback dropped) | 2 |
-| ~~chsh/usermod cascade (`setup:zsh` Phase 2)~~ ✅ | `setup:login-shell-fallback` alone — there is deliberately **no `[bootstrap.user]`** section (its bare `chsh` fails unattended and aborts the whole tail) | 3a |
-| ~~`.zshrc` block injection (`setup:zsh-config`, `setup:shell-tools`)~~ ✅ | baked into committed `.zshrc` w/ runtime guards | 1 |
-| ~~`install:ghostty`, `install:obsidian`, `install:veracrypt`~~ ✅ | ported tasks, profile-gated (`graphical`, `veracrypt`) | 3b |
-| ~~fonts + terminal fonts (inside `setup:zsh`)~~ ✅ | `setup:fonts` task (`graphical`) | 3b |
-| ~~`setup:completions`, `setup:git-signing`~~ ✅ | ported tasks in `[tasks.bootstrap]` | 3a |
-| ~~`setup:zsh` Phase 2 rungs 1/3/4 (sudo chsh, sudo usermod, `exec zsh`)~~ ✅ | `setup:login-shell-fallback` — mise's `[bootstrap.user]` only runs bare `chsh -s` | 3a |
-| hostname prompt (`setup:zsh` Phase 6) | dropped — see below | 3a |
-| ~~`install:gnome-extensions`, `update:gnome-extensions`~~ ✅ | `gnome` profile tasks (manifest still supplied by the custom repo) | 4 |
-| ~~`setup:cosmic*`~~ ✅ | `cosmic` profile tasks (theme picker is manual, not chained) | 4 |
-| ~~`gpg:*` suite~~ ✅ | ported; every mutating path gained a preview/confirm and a pre-import keyring backup | 5 |
-| ~~`update:submodules` + submodule-freshness workflow~~ ✅ | `update:repos` task + `scripts/check-repos.py` + a monthly *notifier* workflow (there is no committed pointer left to bump, so the old PR shape does not transfer) | 5 |
-| ~~`update:obsidian`~~ ✅ | ported (`--check`); `install:obsidian` reports, `update:obsidian` installs | 5 |
-| ~~`lint` (shellcheck/shfmt)~~ ✅ | `repo:lint` — namespaced, and widened to config lint + shellcheck + shfmt + `bash -n`/`zsh -n`; CI calls the task rather than re-deriving the file set | 0, 5 |
-| ~~p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`)~~ ✅ | run `p10k configure`, then `mise dotfiles add ~/.p10k.zsh` to recapture (README "Day-to-day"); the per-device icon is `setup:p10k-icon` → `~/.p10k.local.zsh` | 5 (docs) |
-| ~~`~/.dotfiles-custom` + `setup:custom-dotfiles`~~ ✅ | companion repo v2 (`~/.dotfiles-custom-mise`): data only, one `conf.d/50-custom.toml` drop-in — see [CUSTOM.md](CUSTOM.md) | 6 |
-| ~~git config: aliases, delta, lfs, credential helpers, `.git-completion.bash`, `.git-prompt.sh`, `.git-template/`~~ ✅ | **moved out of the custom repo** into `home/` — none of it is private | 6 |
-| ~~git identity (`user.name`/`user.email`)~~ ✅ | companion repo → `~/.gitconfig.identity`, pulled in by an `[include]` | 6 |
-| ~~`setup:git-signing` data (`~/.gitconfig.local.example`)~~ ✅ | stays in the companion repo (privacy) | 6 |
-| Public-mirror sanitize workflow | TBD (ask user) | 6 |
+| Old | New |
+|---|---|
+| ~~`mise run init` + `bootstrap` task chain~~ ✅ | `install.sh` → `mise bootstrap` → `[tasks.bootstrap]` |
+| ~~Stow packages `bash zsh p10k`~~ ✅ | `[dotfiles]` core entries |
+| ~~Stow packages `fzf bat tmux gh gh-dash claude ruff hunk gpg yazi`~~ ✅ | `[dotfiles]` core entries (+ `yazi` profile) |
+| ~~Stow package `ghostty` (config only)~~ ✅ | `graphical` profile `[dotfiles]` |
+| ~~Stow package `nvim`~~ ✅ | `neovim` profile `[bootstrap.repos]` |
+| ~~Stow package `gnome_themes` (+DE auto-exclude)~~ ✅ | **dropped** — see below; the `gnome` profile now carries only `apt:dconf-cli` and the extension tasks |
+| ~~Stow package `mise` (nested stow)~~ ✅ | self-managed `[dotfiles]` entries in `mise/config.toml` link `config*.toml` + `tasks` into a real `~/.config/mise/` |
+| ~~conf.d tool groups (`runtime cli dev ai yazi neovim`)~~ ✅ | core `[tools]` + profile files |
+| ~~`.device-tag`/`.graphical-env`/`.desktop-env`/`.stow-exclude`/`.mise-conf-exclude`/`.install-exclude` + their picker tasks~~ ✅ | `mise/miserc.toml` profiles |
+| ~~tag-default→tag-X fallback~~ ✅ | template-mode entries on `mise_env`; the companion's `ssh/tag-{laptop,desktop}` is now ONE template |
+| ~~oh-my-zsh installer, plugin/p10k/fzf-tab clones~~ ✅ | `[bootstrap.repos]` |
+| ~~oh-my-tmux + nvim git **submodules**~~ ✅ | `[bootstrap.repos]` (real clones at live paths) |
+| ~~`install:pathpicker`~~ ✅ | `[bootstrap.repos]` + `setup:repo-links` task |
+| ~~`setup:nodes-tools` (corepack enable)~~ ✅ | `post-tools` hook, guarded on `command -v corepack` |
+| ~~`setup:p10k-icon` (writes `~/.p10k.local.zsh`)~~ ✅ | ported, with a shortlist menu + `--icon`/`--show`/`--clear`; asks at most once per machine |
+| ~~Custom repo's `p10k/tag-desktop/.p10k.zsh`~~ ✅ | **dropped** — it differed from the shared config by exactly one line (the OS icon), which `setup:p10k-icon` now writes into the machine-local overlay. Removes the two-repos-one-key hazard |
+| ~~`install:build-deps`, `install:nala`, zsh install~~ ✅ (narrowed — see below) | `[bootstrap.packages]` apt entries |
+| ~~`install:media-tools`~~ ✅ | `media` profile apt entries (ubi fallback dropped) |
+| ~~chsh/usermod cascade (`setup:zsh` Phase 2)~~ ✅ | `setup:login-shell-fallback` alone — there is deliberately **no `[bootstrap.user]`** section (its bare `chsh` fails unattended and aborts the whole tail) |
+| ~~`.zshrc` block injection (`setup:zsh-config`, `setup:shell-tools`)~~ ✅ | baked into committed `.zshrc` w/ runtime guards |
+| ~~`install:ghostty`, `install:obsidian`, `install:veracrypt`~~ ✅ | ported tasks, profile-gated (`graphical`, `veracrypt`) |
+| ~~fonts + terminal fonts (inside `setup:zsh`)~~ ✅ | `setup:fonts` task (`graphical`) |
+| ~~`setup:completions`, `setup:git-signing`~~ ✅ | ported tasks in `[tasks.bootstrap]` |
+| ~~`setup:zsh` Phase 2 rungs 1/3/4 (sudo chsh, sudo usermod, `exec zsh`)~~ ✅ | `setup:login-shell-fallback` — mise's `[bootstrap.user]` only runs bare `chsh -s` |
+| hostname prompt (`setup:zsh` Phase 6) | dropped — see below |
+| ~~`install:gnome-extensions`, `update:gnome-extensions`~~ ✅ | `gnome` profile tasks (manifest still supplied by the custom repo) |
+| ~~`setup:cosmic*`~~ ✅ | `cosmic` profile tasks (theme picker is manual, not chained) |
+| ~~`gpg:*` suite~~ ✅ | ported; every mutating path gained a preview/confirm and a pre-import keyring backup |
+| ~~`update:submodules` + submodule-freshness workflow~~ ✅ | `update:repos` task + `scripts/check-repos.py` + a monthly *notifier* workflow (there is no committed pointer left to bump, so the old PR shape does not transfer) |
+| ~~`update:obsidian`~~ ✅ | ported (`--check`); `install:obsidian` reports, `update:obsidian` installs |
+| ~~`lint` (shellcheck/shfmt)~~ ✅ | `repo:lint` — namespaced, and widened to config lint + shellcheck + shfmt + `bash -n`/`zsh -n`; CI calls the task rather than re-deriving the file set |
+| ~~p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`)~~ ✅ | run `p10k configure`, then `mise dotfiles add ~/.p10k.zsh` to recapture (README "Day-to-day"); the per-device icon is `setup:p10k-icon` → `~/.p10k.local.zsh` |
+| ~~`~/.dotfiles-custom` + `setup:custom-dotfiles`~~ ✅ | companion repo v2 (`~/.dotfiles-custom-mise`): data only, one `conf.d/50-custom.toml` drop-in — see [CUSTOM.md](CUSTOM.md) |
+| ~~git config: aliases, delta, lfs, credential helpers, `.git-completion.bash`, `.git-prompt.sh`, `.git-template/`~~ ✅ | **moved out of the custom repo** into `home/` — none of it is private |
+| ~~git identity (`user.name`/`user.email`)~~ ✅ | companion repo → `~/.gitconfig.identity`, pulled in by an `[include]` |
+| ~~`setup:git-signing` data (`~/.gitconfig.local.example`)~~ ✅ | stays in the companion repo (privacy) |
+| Public-mirror sanitize workflow | TBD (ask user) |
 
 ### Consciously dropped (user-approved 2026-07-19)
 - dnf/pacman support; stow & zsh source-build fallbacks; nala *as installer* (still installed
@@ -57,7 +57,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   `.bashrc` ever sourced it, and its `~/.fzf/bin` PATH block refers to an install method
   neither repo uses (fzf is a `[tools]` entry). `~/.fzf.zsh` *is* sourced by `.zshrc` and
   is kept.
-- **Every interactive prompt inside the bootstrap path** (session B). The old install tasks
+- **Every interactive prompt inside the bootstrap path.** The old install tasks
   asked "install X anyway?", "which method?", "persist this choice?". A chained task *can*
   prompt — it inherits the terminal when `mise bootstrap` is run from one (verified under a
   pty) — but any prompt hangs an unattended run, so the answers now come from the profile
@@ -84,7 +84,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   backend needs. If a tool later fails to build for want of `libssl-dev` or `libclang-dev`, add
   it back to `[bootstrap.packages]` — that is the intended repair, not a regression.
 - **The two vendored GTK themes** (`WhiteSur-dark`, `ChromeOS-dark-compact` — 582 files,
-  4.5 MB), ported in Phase 4 and removed in session C once the user decided this repo is
+  4.5 MB), dropped once the user decided this repo is
   **intended to be public**: every machine using it should end up the same, a public repo
   should not redistribute a third-party theme tree, and the themes only ever applied under the
   `gnome` profile. Install them from upstream (WhiteSur:

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Obsidian install/update helpers, shared by install:obsidian and (Phase 5)
+# Obsidian install/update helpers, shared by install:obsidian and
 # update:obsidian. Source AFTER lib/profile.sh — it needs info/warn/ok/
 # ok_changed/fail/skip/have/gh_curl.
 #

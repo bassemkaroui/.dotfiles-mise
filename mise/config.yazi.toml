@@ -1,7 +1,7 @@
 # Profile: yazi — file manager + rich preview stack (old conf.d/yazi.toml).
 # fzf/zoxide/eza/fd/ripgrep/jq moved to core (shell integration needs them).
 # ffmpeg/imagemagick live in the `media` profile (apt), same split as before.
-# The ~/.config/yazi dotfiles entries land in Phase 2.
+# Its ~/.config/yazi dotfiles entry is declared below.
 [tools]
 yazi = "latest"
 glow = "latest"

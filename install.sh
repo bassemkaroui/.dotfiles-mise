@@ -728,3 +728,14 @@ ok "Done. Day-to-day from any directory:"
 echo "    mise bootstrap status      # what's missing"
 echo "    mise bootstrap --yes       # converge after editing config or profiles"
 echo "    \$EDITOR $MISERC   # change this machine's profiles"
+
+# A few tasks are deliberately NOT in the [tasks.bootstrap] chain because they
+# are interactive menus that would hang an unattended bootstrap. Point the user
+# at the ones that apply to the profiles THIS machine selected — reading them
+# back from miserc.toml so it works whether we just wrote it or it pre-existed.
+active_profiles=" $(grep -E '^env' "$MISERC" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"' | tr '\n' ' ')"
+if [[ "$active_profiles" == *" cosmic "* ]]; then
+    echo
+    ok "Manual step for this machine's cosmic profile:"
+    echo "    mise run setup:cosmic-theme   # pick a COSMIC theme (interactive menu)"
+fi

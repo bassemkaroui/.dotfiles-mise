@@ -11,7 +11,7 @@ What *can* still rot here, and what this checks instead:
 
   1. **An upstream that moved or died.** A `[bootstrap.repos]` clone that fails
      aborts the ENTIRE bootstrap at step 2 — no dotfiles, no tools, no
-     imperative tail (plan §2.28, verified). A repo that gets renamed, made
+     imperative tail (verified). A repo that gets renamed, made
      private or deleted therefore bricks every fresh install, silently, until
      someone tries one. PathPicker is archived upstream today; that class of
      entry is exactly the risk.

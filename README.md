@@ -4,8 +4,16 @@ Declarative dotfiles + machine setup built on [mise bootstrap](https://mise.jdx.
 (mise ≥ 2026.7.7). Successor to the Stow-based [.dotfiles](https://github.com/bassemkaroui/.dotfiles)
 repo — see [MIGRATION.md](MIGRATION.md) for the capability map and cutover checklist.
 
-Targets Debian-family Linux (Ubuntu/Pop!_OS/Mint). Packages install through mise's native
-`apt` manager; `nala` is installed for interactive use but automation never depends on it.
+Targets **Ubuntu 24.04+ / glibc ≥ 2.39**, Debian-family (Ubuntu/Pop!_OS/Mint). Packages
+install through mise's native `apt` manager; `nala` is installed for interactive use but
+automation never depends on it.
+
+The 24.04 floor comes from the `tree-sitter` CLI: the `neovim` profile installs the upstream
+**prebuilt** binary (a source build would drag in a Rust + libclang toolchain), and its
+`latest` release is built on an Ubuntu-24.04 runner, so it needs GLIBC 2.39 at runtime. On
+**22.04** (GLIBC 2.35) nvim-treesitter's parser build fails with ``version `GLIBC_2.39' not
+found``; to run there, pin an older release in `mise/config.neovim.toml` —
+`tree-sitter = "0.25.10"` needs only glibc 2.34.
 
 ## Quick start (new machine)
 

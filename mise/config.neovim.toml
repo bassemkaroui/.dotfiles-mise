@@ -7,6 +7,12 @@ neovim = "stable"
 # Prebuilt CLI (aqua:tree-sitter/tree-sitter) — same versions as the release
 # binaries. The old cargo:tree-sitter-cli source build fails without libclang
 # (rquickjs-sys → bindgen); the prebuilt needs no toolchain.
+#
+# GLIBC FLOOR: the prebuilt is dynamically linked; `latest` (0.26.x) is built on
+# an Ubuntu-24.04 runner → needs GLIBC 2.39. Fine on 24.04; on 22.04 (2.35)
+# nvim-treesitter's `tree-sitter build` dies "version `GLIBC_2.39' not found".
+# This repo targets 24.04+ (README). To run on 22.04 pin a lower-floor release
+# here. Measured floors: 0.26.11=2.39, 0.25.10=2.34, 0.24.7=2.29.
 tree-sitter = "latest"
 
 [bootstrap.repos]

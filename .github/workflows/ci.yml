@@ -325,9 +325,17 @@ jobs:
               err "interactive zsh printed errors on startup"
             fi
 
-            # --- nothing may write into the repo working tree ---
-            dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain)"
-            [[ -z "$dirty" ]] || { echo "$dirty"; err "install.sh wrote into the repo working tree"; }
+            # --- nothing may write into the repo tree, EXCEPT update:tmux-local ---
+            # It runs in the chain and legitimately folds the upstream oh-my-tmux
+            # template delta into home/.config/tmux/tmux.conf.local (advancing
+            # vendor/oh-my-tmux/tmux.conf.local, or parking a .merged preview on
+            # conflict). The container ~/.tmux is always ahead of our committed
+            # base, so it MUST have had an effect — assert that, then hold the
+            # REST of the tree to the no-writes rule.
+            tmux_touched="$(git -C "$HOME/.dotfiles-mise" status --porcelain -- home/.config/tmux/tmux.conf.local home/.config/tmux/tmux.conf.local.merged vendor/oh-my-tmux/tmux.conf.local)"
+            [[ -n "$tmux_touched" ]] || err "update:tmux-local did not fold or preview the upstream template delta"
+            dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain -- . ":(exclude)home/.config/tmux/tmux.conf.local" ":(exclude)home/.config/tmux/tmux.conf.local.merged" ":(exclude)vendor/oh-my-tmux/tmux.conf.local")"
+            [[ -z "$dirty" ]] || { echo "$dirty"; err "install.sh wrote into the repo working tree (outside the tmux-local paths)"; }
 
             exit $fail
           '

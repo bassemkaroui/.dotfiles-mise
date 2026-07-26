@@ -136,6 +136,12 @@ run = [
     { task = "setup:custom-hookup" },
     # 2. Links into [bootstrap.repos] clones (oh-my-tmux config, fpp).
     { task = "setup:repo-links" },
+    # 2b. Fold upstream oh-my-tmux template changes into our customized
+    #     tmux.conf.local. ~/.tmux tracks `master`, so the repos step (which
+    #     runs well before this) fast-forwards it every bootstrap; this folds a
+    #     CLEAN template delta in automatically and parks a CONFLICT in a
+    #     `.merged` preview (never breaking the live config or the chain).
+    { task = "update:tmux-local" },
     # 3. The three every machine needs, headless included.
     { task = "setup:completions" },
     { task = "setup:git-signing" },
@@ -155,6 +161,10 @@ run = [
 # terminal when bootstrap is run from one, but a bootstrap that stops to ask
 # which theme you want is a bootstrap that can't run unattended — and the third
 # writes and commits into another git repo. All three are run by hand.
+# (update:tmux-local IS chained above, unlike those: it needs no input and, on a
+# clean merge, only writes files inside THIS repo — which you commit at leisure;
+# a conflict just parks a preview. update:gnome-extensions writes to a DIFFERENT
+# repo and commits there, which a bootstrap must never do unattended.)
 
 # ── Login shell ───────────────────────────────────────────────────────────────
 # NO [bootstrap.user] SECTION, deliberately. It runs exactly one command,

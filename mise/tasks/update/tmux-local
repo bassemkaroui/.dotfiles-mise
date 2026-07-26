@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#MISE description="Fold upstream oh-my-tmux template changes into our customized tmux.conf.local"
+#MISE raw=true
+#USAGE flag "--check" help="Report drift without merging (no writes)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="update:tmux-local"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# oh-my-tmux ships a `.tmux.conf.local` TEMPLATE meant to be copied and
+# customized; ours lives at home/.config/tmux/tmux.conf.local (deployed as a
+# symlink). The upstream clone ~/.tmux tracks `master` (ref in config.toml), so
+# mise fast-forwards it on every bootstrap and upstream keeps evolving that
+# template. This task folds the template's upstream changes into our customized
+# copy with a 3-way merge, so our tweaks ride on top of a current base.
+#
+#   base   = vendor/oh-my-tmux/tmux.conf.local  — the upstream template we last
+#            synced against. A COMMITTED snapshot, deliberately NOT re-read from
+#            ~/.tmux: the repos step already fast-forwarded that clone (it runs
+#            long before this task), so ~/.tmux is already "theirs". Keeping the
+#            old version in a committed base is what lets the merge still see the
+#            delta even though ~/.tmux updated first.
+#   theirs = ~/.tmux/.tmux.conf.local           — the template now.
+#   ours   = home/.config/tmux/tmux.conf.local  — the template + our changes.
+#
+# In [tasks.bootstrap] this runs in apply mode: a CLEAN merge is applied
+# automatically and the base advances; a CONFLICT is never written to the live
+# file — it goes to a `.merged` preview to resolve by hand — so tmux keeps
+# working either way and bootstrap never aborts here. --check only reports.
+#
+# No require_profile: tmux is a core config, and there is nothing device- or
+# desktop-specific about keeping it in sync.
+
+CHECK="${usage_check:-false}"
+
+have git || skip "git not found — cannot 3-way merge"
+
+BASE="$REPO/vendor/oh-my-tmux/tmux.conf.local"
+OURS="$REPO/home/.config/tmux/tmux.conf.local"
+THEIRS="$HOME/.tmux/.tmux.conf.local"
+PREVIEW="$OURS.merged"
+
+[[ -f "$THEIRS" ]] || skip "oh-my-tmux not cloned yet ($THEIRS missing) — nothing to sync"
+[[ -f "$OURS" ]] || skip "our tmux.conf.local is missing ($OURS)"
+[[ -f "$BASE" ]] || skip "no base snapshot ($BASE) — seed it from the current $THEIRS first"
+
+# Nothing new upstream since the last sync? cmp is a byte compare, so an
+# unchanged template is a fast no-op — the common case on a routine bootstrap.
+if cmp -s "$BASE" "$THEIRS"; then
+    ok "oh-my-tmux template unchanged since last sync — nothing to do"
+    exit 0
+fi
+
+delta="$(diff "$BASE" "$THEIRS" | grep -cE '^[<>]' || true)"
+
+# Trial merge into a temp — OURS is never touched until we know the outcome.
+# git merge-file exits 0 on a clean merge, >0 = number of conflicts. The call
+# lives in an `if`, so a non-zero (conflict) exit does not trip `set -e`.
+merged="$(mktemp)"
+trap 'rm -f "$merged"' EXIT
+if git merge-file -p "$OURS" "$BASE" "$THEIRS" >"$merged" 2>/dev/null; then
+    clean=true
+else
+    clean=false
+fi
+
+if [[ "$CHECK" == "true" ]]; then
+    if [[ "$clean" == true ]]; then
+        info "oh-my-tmux template changed ($delta line(s)); merges CLEANLY — run: mise run update:tmux-local"
+    else
+        warn "oh-my-tmux template changed ($delta line(s)); would CONFLICT — run: mise run update:tmux-local, then resolve"
+    fi
+    exit 0
+fi
+
+if [[ "$clean" == true ]]; then
+    # Apply the merge and advance the base to the version we just merged from.
+    cp "$merged" "$OURS"
+    cp "$THEIRS" "$BASE"
+    # A stale preview from an earlier conflict is now obsolete — clear it.
+    rm -f "$PREVIEW"
+    ok_changed "Folded $delta upstream template line(s) into tmux.conf.local"
+    info "Review and commit: git -C $REPO diff -- home/.config/tmux vendor/oh-my-tmux"
+else
+    # Conflict: leave OURS (the live config) untouched so tmux keeps working,
+    # and stage the marked-up merge for a human. The base is NOT advanced, so
+    # the next bootstrap re-detects the drift and re-nags until it is resolved.
+    cp "$merged" "$PREVIEW"
+    warn "oh-my-tmux template changed ($delta line(s)) and conflicts with your customizations."
+    warn "Your live tmux config is UNTOUCHED. Resolve the <<<< markers in:"
+    warn "    $PREVIEW"
+    warn "then: mv '$PREVIEW' '$OURS' && cp '$THEIRS' '$BASE'  (advance the base), review 'git diff', commit."
+fi

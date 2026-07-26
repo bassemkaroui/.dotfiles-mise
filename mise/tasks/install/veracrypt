@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Install the VeraCrypt console .deb matching this Ubuntu release"
 #MISE raw=true
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
@@ -34,6 +35,17 @@ VERSION="${TAG#VeraCrypt_}"
 # e.g. "1.26.24-1~ubuntu22.04-1" → "1.26.24"
 if [[ "${INSTALLED%%-*}" == "$VERSION" ]]; then
     ok "VeraCrypt $VERSION already installed"
+    exit 0
+fi
+
+# Installs are automatic; UPGRADES are opt-in, matching install:ghostty and
+# install:obsidian. This chained task used to swap the binary of an installed
+# app the moment upstream cut a release — the exact behaviour those two avoid,
+# and VeraCrypt is no less likely to be running at the time. First install (no
+# $INSTALLED) still proceeds unattended, so a fresh machine needs no flag.
+if [[ -n "$INSTALLED" ]] && [[ "${usage_update:-false}" != "true" ]]; then
+    ok "VeraCrypt ${INSTALLED%%-*} installed; $VERSION is available"
+    info "(upgrade with: mise run install:veracrypt --update)"
     exit 0
 fi
 

@@ -72,6 +72,11 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `neovim` | neovim + tree-sitter + personal nvim config |
 | `media` | ffmpeg + imagemagick (apt) |
 | `veracrypt` | VeraCrypt (console) |
+| `tailscale` | Tailscale. Installs and starts the daemon; **never runs `tailscale up`** — joining a tailnet needs a browser, so do it by hand (or set `$TAILSCALE_AUTHKEY`) |
+| `docker` | Docker Engine + CLI + containerd + buildx/compose plugins, plus lazydocker and dive. Adds you to the `docker` group, which is equivalent to root |
+| `1password` | 1Password desktop app (apt) + the `op` CLI (mise tool) |
+| `browsers` | Brave (apt) + Zen (upstream tarball, the layout Zen's own installer uses) — implies `graphical` |
+| `virt` | VirtualBox, Oracle's build + Vagrant. Skips when a distro-packaged `virtualbox` is present; dkms modules need kernel headers, and Secure Boot needs a MOK enrolment |
 | `laptop` / `desktop` | device markers consumed by template-mode dotfiles (no standalone config) |
 
 After editing profiles: `mise bootstrap --yes` (add) — removals leave files behind by design;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Check for and install a newer Zen browser AppImage release"
+#MISE description="Check for and install a newer Zen browser release"
 #MISE raw=true
 #USAGE flag "--check" help="Report an available update without installing it"
 set -eo pipefail
@@ -12,6 +12,11 @@ source "$LIB/profile.sh"
 # shellcheck source=../lib/zen.sh
 source "$LIB/zen.sh"
 
+# Zen also updates ITSELF (the tarball install carries the browser's built-in
+# updater), so this is the manual, scriptable path rather than the only one —
+# and because zen_installed_version reads the install's own application.ini, a
+# self-update is picked up here with no state of ours to go stale.
+#
 # The division of labour with install:zen, which shares lib/zen.sh:
 #   install:zen   runs in the chain; installs when absent, otherwise only
 #                 REPORTS an available upgrade unless given --update, so a
@@ -47,5 +52,5 @@ if [[ "$CHECK" == "true" ]]; then
 fi
 
 info "Updating Zen $CURRENT → $LATEST"
-zen_install_appimage "$LATEST" "$(zen_appimage_url)"
+zen_install_tarball "$LATEST" "$(zen_tarball_url)"
 ok "Zen updated to $(zen_installed_version)"

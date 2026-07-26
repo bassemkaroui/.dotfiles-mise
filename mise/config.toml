@@ -172,7 +172,7 @@ run = [
     { task = "setup:cosmic" },
     # 7. Vendor-repo apps (docker profile, virt, 1password, browsers,
     #    tailscale). Ordered cheapest-first; install:zen is last because it is
-    #    the only one that downloads a ~100 MB AppImage.
+    #    the only one that downloads a ~100 MB tarball.
     { task = "install:tailscale" },
     { task = "install:docker" },
     { task = "install:1password" },

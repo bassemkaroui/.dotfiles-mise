@@ -158,6 +158,12 @@ locally means passing in CI. **Never push without a clean run.** If a lint objec
 containing literal tokens (a `~/...` meant as display text), suppress it with an inline
 `# shellcheck disable=<code>` naming the rule and saying why — don't rewrite the message.
 
+**Commit straight to `main`. Never create a branch unless you are explicitly told to.** This is a
+single-maintainer dotfiles repo with no PR workflow, so a feature branch is pure friction — it
+has to be merged and deleted again before anything is usable. The default "branch before
+committing to the default branch" habit does not apply here. Still commit only when asked, and
+still never push without a clean `mise run repo:lint`.
+
 **Adding a profile** means five touchpoints, not one: `mise/config.<name>.toml` (only if it
 declares something — a task-only profile like `veracrypt` needs no file), `KNOWN_PROFILES` in
 `install.sh` (the lint fails otherwise, and `install.sh` would silently drop the name), the list

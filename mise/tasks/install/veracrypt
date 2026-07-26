@@ -10,10 +10,9 @@ TASK_NAME="install:veracrypt"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
 # Port of the old repo's install:veracrypt. VeraCrypt was default-on there with
-# an .install-exclude opt-out; it is now opt-in via this profile (user decision
-# §7.3). The .deb is per-Ubuntu-release, so "no asset for this release" is a
-# routine outcome on a newer/non-LTS host — it warns and skips rather than
-# aborting the bootstrap chain.
+# an .install-exclude opt-out; it is now opt-in via this profile. The .deb is
+# per-Ubuntu-release, so "no asset for this release" is a routine outcome on a
+# newer/non-LTS host — it warns and skips rather than aborting the chain.
 require_profile veracrypt
 
 have dpkg-query dpkg curl python3 || skip "Needs dpkg/curl/python3 — not a Debian-family machine?"

@@ -98,7 +98,7 @@ fi
 #
 # The old task hardcoded the custom repo's stow layout (`git add
 # gnome_extensions/ .custom-packages`). Staging the two resolved paths instead
-# works whatever layout the v2 custom repo ends up with (Phase 6).
+# works whatever layout the v2 custom repo ends up with.
 
 git_root=""
 dir="$(dirname "$MANIFEST_REAL")"

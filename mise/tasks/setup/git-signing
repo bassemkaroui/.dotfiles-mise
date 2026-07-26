@@ -9,7 +9,7 @@ TASK_NAME="setup:git-signing"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# D12: git identity and the signing key stay in the PRIVATE companion repo —
+# Git identity and the signing key stay in the PRIVATE companion repo —
 # the one thing in this migration that must not land in a repo that might ever
 # be mirrored publicly. The split, as of the git port:
 #

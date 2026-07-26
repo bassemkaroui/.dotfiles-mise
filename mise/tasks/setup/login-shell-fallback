@@ -38,12 +38,12 @@ fi
 
 # This task owns the login shell outright — there is no [bootstrap.user]
 # section, because mise's version runs bare `chsh -s`, which PAM-prompts and so
-# fails unattended, and a failing bootstrap step aborts every step after it
-# (§2.27). That made this very task unreachable in the case it exists for.
+# fails unattended, and a failing bootstrap step aborts every step after it —
+# which made this very task unreachable in the case it exists for.
 #
 # The old repo's four-rung cascade (setup/zsh:112-158), in the order that works:
 # sudo chsh → sudo usermod (both unattended-safe) → plain chsh (needs a
-# terminal; a chained task does have one, §2.22) → `exec zsh` in a login file.
+# terminal; a chained task does have one) → `exec zsh` in a login file.
 # NSS-managed accounts skip the first three: they aren't in /etc/passwd, so
 # chsh/usermod can only fail with "user does not exist".
 NSS_ONLY=false

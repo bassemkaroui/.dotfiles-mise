@@ -231,12 +231,21 @@ Working document. Cutover checklist at the bottom is the only part end users nee
    `origin/custom_config` — the branch the new repo clones. Check with
    `git -C ~/.dotfiles/nvim/tag-default/.config/nvim status -sb` and push before cutting
    over; the backup tar above is the safety net, not the plan.
-3. Unstow everything with **both** old repos (this restores their `.bak` backups):
-   for each deployed package: `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in
-   `.device-tag`). The `mise` package last. Then the companion:
-   `stow -D -d ~/.dotfiles-custom/<pkg> -t ~ tag-<tag>` for `git`, `ssh`, `p10k` and
-   `gnome_extensions` — `install.sh` refuses to run while anything still resolves into either
-   clone.
+3. Unstow everything from **both** old repos: for each deployed package,
+   `stow -D -d ~/.dotfiles/<pkg> -t ~ tag-default` (or the tag in `.device-tag`). The `mise`
+   package last. Then the companion: `stow -D -d ~/.dotfiles-custom/<pkg> -t ~ tag-<tag>` for
+   `git`, `ssh`, `p10k` and `gnome_extensions` — `install.sh` refuses to run while anything
+   still resolves into either clone. Packages that were never deployed on this machine (a tag
+   that doesn't match, a DE-excluded one like `gnome_themes`) unstow to 0 links; that is a
+   no-op, not a problem.
+   Plain `stow -D` only removes symlinks — it does **not** restore the `<file>.bak` copies the
+   old repo's `setup:dotfiles` made when it first stowed over a real file (that restore lives
+   in `unstow_package()` in the old `helpers.sh`, which nothing here calls). Leaving them is
+   deliberate: any such backup predates the old repo, and step 5 would only move it aside to
+   `.pre-mise.bak` again. Take what you want out of them by hand.
+   Two kinds of leftovers unstow cannot reach, both safe to delete once the links are gone:
+   `~/.config/mise.bak*` (copies of the stowed mise dir, from earlier `install.sh` runs) and
+   any `*.bak` sibling of a former target.
 3b. Clean the `[bootstrap.repos]` clones. `git -C ~/.oh-my-zsh status --porcelain` and the same
    for each plugin clone: any untracked file there aborts the bootstrap (see the limitations
    above). On the author's laptop this is `~/.oh-my-zsh/completions/` and generated `_helm` /

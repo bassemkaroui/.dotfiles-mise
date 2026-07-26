@@ -38,7 +38,8 @@ templates/          template-mode sources ({% if mise_env is defined and "laptop
 sandbox/mkhome.sh   throwaway-$HOME verification harness
 scripts/lint-config.py   the config lint CI runs
 vendor/             pristine upstream snapshots (merge base for update:tmux-local)
-docs/upstream/      vendored mise docs (gitignored; docs/fetch.sh refreshes)
+docs/fetch.sh       populates docs/upstream/ — run it after cloning
+docs/upstream/      vendored mise docs (NOT committed; absent until fetched)
 ```
 
 Per-machine state lives **outside** the repo, in a real `~/.config/mise/` directory:
@@ -69,6 +70,7 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
 | **Everything CI runs, before you push** | **`mise run repo:lint`** |
 | Config collision lint only | `python3 scripts/lint-config.py` (`--live` for `~/.config/mise`) |
 | Throwaway-`$HOME` verification | `sandbox/mkhome.sh` |
+| **Fetch the upstream mise docs** (do this first on a fresh clone) | **`docs/fetch.sh`** |
 | Fold upstream oh-my-tmux changes in | `mise run update:tmux-local` |
 | Update unpinned clones | `mise run update:repos` |
 | List every task | `mise tasks` |
@@ -118,11 +120,29 @@ Details and the evidence behind each: `.claude/docs/architectural_patterns.md`.
 **Before starting any non-trivial task**, create a task list with `TaskCreate` and keep it
 current (`in_progress` when you start, `completed` when done).
 
-**Read before you design.** This feature set is newer than any model's training data. The
-vendored upstream docs are at `docs/upstream/` (`docs/fetch.sh` refreshes them; set
-`MISE_DOCS_REF=v<version>` to pin to the installed mise). `mise <cmd> --help` on the installed
-binary is authoritative where the docs and the behaviour disagree — and they have disagreed.
-`.claude/docs/mise_behaviours.md` is the accumulated record of those disagreements.
+**Read before you design.** This feature set is newer than any model's training data, so do not
+design or debug from recall.
+
+The upstream mise documentation is vendored at `docs/upstream/`, but it is **gitignored and not
+committed — on a fresh clone that directory does not exist**. Populate it first:
+
+```bash
+docs/fetch.sh                      # or: MISE_DOCS_REF=v2026.7.13 docs/fetch.sh
+```
+
+Pin `MISE_DOCS_REF` to the tag matching the installed mise (`mise --version`) when you need the
+docs to describe exactly the behaviour you are verifying against; it defaults to `main`, which
+may already be ahead of the machine. Re-run it on a version bump.
+
+The pages worth reading before touching config: `bootstrap.md`, `dotfiles.md`, `configuration.md`,
+`configuration/environments.md`, `configuration/settings.md`, `templates.md`,
+`tasks/task-configuration.md`, `bootstrap/{repos,shell,user,systemd}.md` and
+`bootstrap/packages/{index,apt,plugins}.md`.
+
+**`mise <cmd> --help` on the installed binary is authoritative where the docs and the behaviour
+disagree** — and they have disagreed, more than once (documented subcommands that don't exist,
+settings that are silently capped). `.claude/docs/mise_behaviours.md` is the accumulated record
+of those disagreements; read it before designing anything.
 
 **Never test against the real `$HOME`.** Use `sandbox/mkhome.sh`, or stub `sudo`/`apt-get`/`curl`
 on `PATH` for anything privileged. A hand-rolled sandbox must live under `/tmp` — mise resolves

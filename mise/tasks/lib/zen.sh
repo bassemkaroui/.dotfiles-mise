@@ -3,24 +3,36 @@
 # Source AFTER lib/profile.sh — it needs info/warn/ok/ok_changed/skip/have/
 # gh_curl.
 #
-# Same shape as lib/obsidian.sh, and deliberately a separate file rather than a
-# generalisation of it: folding both into one lib/appimage.sh is the right end
-# state, but rewriting a working, already-bug-fixed installer is a change that
-# deserves its own review rather than riding along with a new app.
+# ─── Why the tarball and not the AppImage ────────────────────────────────────
+#
+# Zen publishes both. The tarball is what its official installer
+# (https://updates.zen-browser.app/install.sh) deploys, and it is the only one
+# of the two the browser's BUILT-IN updater can service — an AppImage install
+# has no in-place update path, so it would go stale between bootstraps and
+# fight the updater rather than feed it.
+#
+# It is also what is already on the author's machine, which is how the first
+# draft's bug was found: that draft installed the AppImage to ~/.local/bin/zen
+# and wrote its own ~/.local/share/applications/zen.desktop — the exact two
+# paths the official installer uses. It would have overwritten a working
+# tarball install's launcher wrapper and its richer desktop entry (four Desktop
+# Actions), and because the AppImage version stamp lived in a state file that a
+# tarball install does not have, the "already installed" check would not even
+# have fired first.
+#
+# So this mirrors the official installer's layout exactly, and adopts an
+# existing install instead of replacing it.
 
-ZEN_REPO="zen-browser/desktop"
+ZEN_DIR="$HOME/.tarball-installations/zen"
 ZEN_BIN="$HOME/.local/bin/zen"
-ZEN_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zen"
-ZEN_VERSION_FILE="$ZEN_STATE_DIR/version"
 ZEN_DESKTOP_FILE="$HOME/.local/share/applications/zen.desktop"
-ZEN_ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/zen.png"
 
 # Cached latest-release JSON (populated by zen_fetch_release).
 ZEN_RELEASE_JSON=""
 
 zen_fetch_release() {
     [[ -n "$ZEN_RELEASE_JSON" ]] && return 0
-    ZEN_RELEASE_JSON="$(gh_curl -fsSL "https://api.github.com/repos/$ZEN_REPO/releases/latest")" || return 1
+    ZEN_RELEASE_JSON="$(gh_curl -fsSL "https://api.github.com/repos/zen-browser/desktop/releases/latest")" || return 1
     [[ -n "$ZEN_RELEASE_JSON" ]]
 }
 
@@ -32,17 +44,16 @@ zen_latest_version() {
         | grep '"tag_name"' | head -1 | sed -E 's/.*"v?([^"]+)".*/\1/'
 }
 
-# Echo the AppImage download URL for this machine's architecture.
+# Echo the tarball URL for this machine's architecture.
 #
-# The trailing-quote anchor is load-bearing: every Zen release ships
-# `zen-x86_64.AppImage` AND `zen-x86_64.AppImage.zsync` (an rsync-style delta
-# index, not a runnable binary). Without the anchor the grep matches both and
-# head -1 picks whichever GitHub lists first.
-zen_appimage_url() {
+# The trailing-quote anchor matters here as much as it does for the AppImage
+# assets: a release ships zen.linux-x86_64.tar.xz alongside .mar and .zsync
+# siblings, and an unanchored match takes whichever GitHub lists first.
+zen_tarball_url() {
     local pattern
     case "$(uname -m)" in
-        x86_64) pattern='zen-x86_64\.AppImage"' ;;
-        aarch64 | arm64) pattern='zen-aarch64\.AppImage"' ;;
+        x86_64) pattern='zen\.linux-x86_64\.tar\.xz"' ;;
+        aarch64 | arm64) pattern='zen\.linux-aarch64\.tar\.xz"' ;;
         *) return 0 ;;
     esac
     printf '%s' "$ZEN_RELEASE_JSON" \
@@ -52,81 +63,125 @@ zen_appimage_url() {
         | sed -E 's/.*"(https[^"]+)".*/\1/'
 }
 
+# Echo the installed version, read from the install itself.
+#
+# application.ini is written by the build, so it stays correct even when Zen's
+# own updater upgrades in place behind our back — which a separate state file
+# of ours would not. That is why there is no ~/.local/state/zen here.
 zen_installed_version() {
-    [[ -f "$ZEN_VERSION_FILE" && -x "$ZEN_BIN" ]] || return 0
-    tr -d '[:space:]' <"$ZEN_VERSION_FILE"
+    [[ -f "$ZEN_DIR/application.ini" ]] || return 0
+    sed -n 's/^Version=//p' "$ZEN_DIR/application.ini" | head -1
 }
 
-# Best-effort menu integration. Never fatal: AppImage extraction fails on
-# FUSE-less hosts, where the launcher just gets a blank icon.
-zen_desktop_integration() {
-    local version="$1" extract_dir icon
-    mkdir -p "$(dirname "$ZEN_DESKTOP_FILE")" "$(dirname "$ZEN_ICON_FILE")"
+# True when ~/.local/bin/zen is absent or is a launcher we can safely rewrite
+# (i.e. it points into $ZEN_DIR). Anything else — a real binary, an AppImage, a
+# wrapper into some other prefix — is someone else's install, and this task
+# must not silently replace it.
+zen_launcher_is_ours() {
+    [[ -e "$ZEN_BIN" ]] || return 0
+    grep -qF "$ZEN_DIR/zen" "$ZEN_BIN" 2>/dev/null
+}
 
-    extract_dir="$(mktemp -d)"
-    if (cd "$extract_dir" && "$ZEN_BIN" --appimage-extract >/dev/null 2>&1); then
-        icon="$(find "$extract_dir/squashfs-root" -maxdepth 2 -name '*.png' 2>/dev/null | head -1)"
-        if [[ -n "$icon" ]]; then
-            cp "$icon" "$ZEN_ICON_FILE"
-            ok "Installed the Zen icon"
-        else
-            warn "No icon found in the Zen AppImage — the menu entry may show a blank icon"
-        fi
-    else
-        warn "Could not extract the Zen icon — the menu entry may show a blank icon"
-    fi
-    rm -rf "$extract_dir"
+# Launcher wrapper + desktop entry, matching what Zen's official installer
+# writes (including the four Desktop Actions — a plainer entry would be a
+# downgrade for anyone migrating from it).
+zen_write_launcher() {
+    mkdir -p "$(dirname "$ZEN_BIN")" "$(dirname "$ZEN_DESKTOP_FILE")"
+
+    cat >"$ZEN_BIN" <<EOF
+#!/bin/bash
+exec "$ZEN_DIR/zen" "\$@"
+EOF
+    chmod +x "$ZEN_BIN"
 
     cat >"$ZEN_DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Name=Zen Browser
-Comment=Calm internet browser
-Exec=$ZEN_BIN %u
-Icon=zen
+Comment=Experience tranquillity while browsing the web without people tracking you!
+Keywords=web;browser;internet
+Exec=$ZEN_DIR/zen %u
+Icon=$ZEN_DIR/browser/chrome/icons/default/default128.png
 Terminal=false
-Type=Application
-Categories=Network;WebBrowser;
-MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
 StartupWMClass=zen
-X-Zen-Version=$version
+NoDisplay=false
+Type=Application
+MimeType=text/html;text/xml;application/xhtml+xml;application/vnd.mozilla.xul+xml;text/mml;x-scheme-handler/http;x-scheme-handler/https;
+Categories=Network;WebBrowser;
+Actions=new-window;new-blank-window;new-private-window;profile-manager-window;
+[Desktop Action new-window]
+Name=Open a New Window
+Exec=$ZEN_DIR/zen --new-window %u
+[Desktop Action new-blank-window]
+Name=Open a New Blank Window
+Exec=$ZEN_DIR/zen --blank-window %u
+[Desktop Action new-private-window]
+Name=Open a New Private Window
+Exec=$ZEN_DIR/zen --private-window %u
+[Desktop Action profile-manager-window]
+Name=Open the Profile Manager
+Exec=$ZEN_DIR/zen --ProfileManager
 EOF
-    ok "Wrote the desktop launcher: $ZEN_DESKTOP_FILE"
 
     if have update-desktop-database; then
         update-desktop-database "$(dirname "$ZEN_DESKTOP_FILE")" >/dev/null 2>&1 || true
     fi
 }
 
-# Download, verify, install, stamp the version, wire up the launcher.
+# Download, verify, and swap in the given version.
+#
 # A download failure is environmental, so it `skip`s (exits 0) rather than
 # aborting the bootstrap chain — call this from the task's main shell, not a
 # subshell.
-zen_install_appimage() {
-    local version="$1" url="$2" tmp
-    [[ -n "$url" ]] || skip "No Zen AppImage for architecture $(uname -m)"
+zen_install_tarball() {
+    local version="$1" url="$2" tmp staging old
+    [[ -n "$url" ]] || skip "No Zen tarball for architecture $(uname -m)"
 
-    mkdir -p "$(dirname "$ZEN_BIN")" "$ZEN_STATE_DIR"
+    zen_launcher_is_ours || skip "$ZEN_BIN is not a launcher this task manages — leaving it alone"
 
     tmp="$(mktemp)"
     info "Downloading Zen $version ..."
     if ! curl -fSL -o "$tmp" "$url"; then
         rm -f "$tmp"
-        skip "Failed to download the Zen AppImage from $url"
+        skip "Failed to download the Zen tarball from $url"
     fi
-    chmod +x "$tmp"
-    # Prove it is an executable before recording it as the installed version.
-    # lib/obsidian.sh had the bug this prevents: a truncated download or an
-    # HTML error page was moved into place and stamped, after which every later
-    # run reported "up to date" and never retried.
-    if ! head -c 4 "$tmp" | grep -q $'\x7fELF'; then
-        rm -f "$tmp"
-        skip "The downloaded Zen AppImage is not an executable (truncated or an error page?)"
-    fi
-    mv "$tmp" "$ZEN_BIN"
-    printf '%s\n' "$version" >"$ZEN_VERSION_FILE"
-    ok_changed "Zen $version installed to $ZEN_BIN"
 
-    zen_desktop_integration "$version"
+    # Unpack to a staging dir and prove it is a Zen tree BEFORE touching the
+    # live one. curl -f catches a bad response, not a truncated-but-200 body,
+    # and the failure mode of getting this wrong is a browser that won't start.
+    staging="$(mktemp -d)"
+    if ! tar -xJf "$tmp" -C "$staging" 2>/dev/null; then
+        rm -rf "$tmp" "$staging"
+        skip "The downloaded Zen tarball could not be unpacked (truncated?)"
+    fi
+    rm -f "$tmp"
+    if [[ ! -x "$staging/zen/zen" || ! -f "$staging/zen/application.ini" ]]; then
+        rm -rf "$staging"
+        skip "The Zen tarball does not contain the expected zen/ tree"
+    fi
+
+    mkdir -p "$(dirname "$ZEN_DIR")"
+    # Move the old install aside rather than deleting it first: if the swap
+    # fails halfway there is still something to put back.
+    old=""
+    if [[ -d "$ZEN_DIR" ]]; then
+        old="$ZEN_DIR.replacing.$$"
+        if ! mv "$ZEN_DIR" "$old"; then
+            rm -rf "$staging"
+            skip "Could not move the existing install aside at $ZEN_DIR"
+        fi
+    fi
+    if ! mv "$staging/zen" "$ZEN_DIR"; then
+        [[ -n "$old" ]] && mv "$old" "$ZEN_DIR"
+        rm -rf "$staging"
+        skip "Could not install the new Zen tree at $ZEN_DIR"
+    fi
+    rm -rf "$staging"
+    [[ -n "$old" ]] && rm -rf "$old"
+
+    zen_write_launcher
+    ok_changed "Zen $version installed to $ZEN_DIR"
+    ok "Launcher: $ZEN_BIN — menu entry: $ZEN_DESKTOP_FILE"
 
     # Make zen resolvable in the current session.
     export PATH="$HOME/.local/bin:$PATH"

@@ -18,8 +18,8 @@
 #   1password  1Password desktop app + the `op` CLI
 #   browsers   Brave (apt) + Zen (tarball)           (implies: graphical)
 #   virt       VirtualBox (Oracle build) + Vagrant
-#   laptop     device marker for template-mode dotfiles (mutually exclusive
-#   desktop    with each other; no standalone config file)
+#   laptop     device marker for template-mode dotfiles (excludes desktop)
+#   desktop    device marker for template-mode dotfiles (excludes laptop)
 #
 # "implies" is documentation, not mechanics — list implied profiles explicitly.
 #

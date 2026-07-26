@@ -54,7 +54,7 @@ Re-running any of it is safe — everything converges.
 ## Profiles
 
 A machine opts **in** to capability groups via `~/.config/mise/miserc.toml` (machine-local,
-outside the repo — `install.sh` seeds it):
+outside the repo — `install.sh` seeds it, and `mise run setup:profiles` edits it afterwards):
 
 ```toml
 env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
@@ -89,6 +89,7 @@ mise bootstrap status            # everything: packages, repos, dotfiles, shell,
 mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
+mise run setup:profiles          # add/remove this machine's profiles (space toggles; --list)
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise run setup:hostname          # rename this machine, /etc/hosts too (--show / --name)
 mise bootstrap repos status      # cloned-repo drift

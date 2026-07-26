@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+#MISE description="Add or remove this machine's profiles in miserc.toml (interactive)"
+#MISE raw=true
+#USAGE flag "--list" help="Print the current selection and exit"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:profiles"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Deliberately NOT in [tasks.bootstrap]: it is a menu, and the whole point of
+# the profile model is that listing a profile IS the consent. A prompt inside
+# an unattended converge would invert that.
+#
+# install.sh already has a numbered picker, but it only fires when miserc.toml
+# does NOT exist — after the first run the only way to change profiles was to
+# hand-edit the file. This is the editor for every run after the first.
+#
+# The profile list is PARSED from install.sh's KNOWN_PROFILES rather than
+# duplicated here, for the same reason scripts/lint-config.py parses it: that
+# array is the registry, and a second copy would drift. Adding a profile stays
+# the five touchpoints CLAUDE.md documents — this menu picks it up for free.
+
+REPO="${DOTFILES_MISE_REPO:-$HOME/.dotfiles-mise}"
+CONF="${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}"
+MISERC="$CONF/miserc.toml"
+INSTALL_SH="$REPO/install.sh"
+EXAMPLE="$REPO/mise/miserc.example.toml"
+
+LIST_ONLY="${usage_list:-false}"
+
+# ─── The registry ─────────────────────────────────────────────────────────────
+
+[[ -r "$INSTALL_SH" ]] || fail "Cannot read $INSTALL_SH — the profile registry lives there"
+
+# KNOWN_PROFILES=( ... ) spans two lines, so slurp the range and split on
+# whitespace. Same shape scripts/lint-config.py matches.
+mapfile -t ALL < <(
+    sed -n '/^KNOWN_PROFILES=(/,/)/p' "$INSTALL_SH" \
+        | tr '\n' ' ' \
+        | sed -e 's/^KNOWN_PROFILES=(//' -e 's/).*$//' \
+        | tr -s '[:space:]' '\n' \
+        | sed '/^$/d'
+)
+((${#ALL[@]} > 0)) || fail "Could not parse KNOWN_PROFILES=( ... ) out of install.sh"
+
+# Descriptions come from the menu block in miserc.example.toml ("#   name  text").
+# Absent is fine — the name alone is still selectable.
+declare -A DESC=()
+if [[ -r "$EXAMPLE" ]]; then
+    while IFS= read -r line; do
+        [[ "$line" =~ ^\#\ \ \ ([A-Za-z0-9_-]+)\ \ +(.*)$ ]] || continue
+        d="${BASH_REMATCH[2]}"
+        d="${d/ (implies: */}"         # drop first: the table pads BEFORE it,
+        d="${d%"${d##*[![:space:]]}"}" # so rtrim only works afterwards
+        DESC[${BASH_REMATCH[1]}]="$d"
+    done <"$EXAMPLE"
+fi
+((${#DESC[@]} > 0)) || warn "No descriptions parsed from $EXAMPLE — showing bare names"
+
+# ─── Current selection ────────────────────────────────────────────────────────
+
+declare -A ON=()
+CURRENT=()
+if [[ -f "$MISERC" ]]; then
+    env_line="$(grep -nE '^[[:space:]]*env[[:space:]]*=' "$MISERC" | head -1 || true)"
+    if [[ -n "$env_line" ]]; then
+        mapfile -t CURRENT < <(printf '%s' "${env_line#*:}" | grep -oE '"[^"]*"' | tr -d '"' | sed '/^$/d')
+    fi
+fi
+for p in ${CURRENT[@]+"${CURRENT[@]}"}; do ON["$p"]=1; done
+
+# A profile in miserc.toml that is not in the registry is worth surfacing: mise
+# silently ignores an env name with no config.<name>.toml and no gated task.
+UNKNOWN=()
+for p in ${CURRENT[@]+"${CURRENT[@]}"}; do
+    [[ " ${ALL[*]} " == *" $p "* ]] || UNKNOWN+=("$p")
+done
+
+if [[ "$LIST_ONLY" == "true" ]]; then
+    ok "Selected (${#CURRENT[@]}): ${CURRENT[*]:-none}"
+    ((${#UNKNOWN[@]} == 0)) || warn "Not in install.sh's KNOWN_PROFILES: ${UNKNOWN[*]}"
+    exit 0
+fi
+
+[[ -t 0 && -t 1 ]] || skip "Not a terminal — run this from an interactive shell (or use --list)"
+
+# ─── The menu ─────────────────────────────────────────────────────────────────
+
+CURSOR=0
+NOTE=""
+DREW=0
+
+# Widest name, so the description column lines up whatever the registry holds.
+NAMEW=0
+for p in "${ALL[@]}"; do ((${#p} > NAMEW)) && NAMEW=${#p}; done
+
+cursor_show() { printf '\033[?25h'; }
+cursor_hide() { printf '\033[?25l'; }
+
+# Always restore the cursor, including on Ctrl-C.
+restore() {
+    cursor_show
+    printf '\n'
+}
+trap restore EXIT
+trap 'exit 130' INT TERM
+
+draw() {
+    local i mark ptr line n=0
+    # Redraw in place: jump back over the previous frame.
+    ((DREW == 0)) || printf '\033[%dA' "$DREW"
+
+    printf '\033[K  \033[1mProfiles for this machine\033[0m\n'
+    printf '\033[K  \033[2m%s\033[0m\n' "$MISERC"
+    printf '\033[K\n'
+    n=3
+    for i in "${!ALL[@]}"; do
+        p="${ALL[$i]}"
+        [[ -n "${ON[$p]:-}" ]] && mark='x' || mark=' '
+        if ((i == CURSOR)); then ptr=$'\033[36m\xe2\x80\xba\033[0m'; else ptr=' '; fi
+        if [[ -n "${ON[$p]:-}" ]]; then
+            line="$(printf '\033[32m[%s]\033[0m \033[1m%-*s\033[0m \033[2m%s\033[0m' \
+                "$mark" "$NAMEW" "$p" "${DESC[$p]:-}")"
+        else
+            line="$(printf '[%s] \033[2m%-*s %s\033[0m' \
+                "$mark" "$NAMEW" "$p" "${DESC[$p]:-}")"
+        fi
+        printf '\033[K   %b %b\n' "$ptr" "$line"
+        ((n++))
+    done
+    printf '\033[K\n'
+    printf '\033[K  \033[2m↑↓/jk move · SPACE toggle · a all · n none · s save · q quit\033[0m\n'
+    n=$((n + 2))
+    if [[ -n "$NOTE" ]]; then
+        printf '\033[K  \033[1;33m%s\033[0m\n' "$NOTE"
+        ((n++))
+    else
+        printf '\033[K\n'
+        ((n++))
+    fi
+    DREW=$n
+}
+
+# One keypress -> a word. Arrow keys arrive as ESC [ A/B, so on ESC peek two
+# more bytes with a short timeout (a bare ESC then reads as "esc", not a hang).
+read_key() {
+    local k rest
+    IFS= read -rsn1 k 2>/dev/null || return 1
+    if [[ "$k" == $'\e' ]]; then
+        rest=""
+        IFS= read -rsn2 -t 0.05 rest 2>/dev/null || true
+        case "$rest" in
+            '[A') printf 'up' ;;
+            '[B') printf 'down' ;;
+            '') printf 'esc' ;;
+            *) printf 'other' ;;
+        esac
+        return 0
+    fi
+    case "$k" in
+        ' ') printf 'space' ;;
+        '') printf 'enter' ;;
+        j | J) printf 'down' ;;
+        k | K) printf 'up' ;;
+        s | S) printf 'save' ;;
+        q | Q) printf 'quit' ;;
+        a | A) printf 'all' ;;
+        n | N) printf 'none' ;;
+        *) printf 'other' ;;
+    esac
+}
+
+toggle() {
+    local p="$1" other=""
+    if [[ -n "${ON[$p]:-}" ]]; then
+        unset "ON[$p]"
+        return
+    fi
+    ON["$p"]=1
+    # laptop/desktop are device markers for template-mode dotfiles and are
+    # mutually exclusive; enabling one clears the other rather than erroring.
+    case "$p" in
+        laptop) other="desktop" ;;
+        desktop) other="laptop" ;;
+    esac
+    if [[ -n "$other" && -n "${ON[$other]:-}" ]]; then
+        unset "ON[$other]"
+        NOTE="$other cleared — laptop and desktop are mutually exclusive"
+    fi
+}
+
+((${#UNKNOWN[@]} == 0)) || NOTE="ignoring unknown profile(s) in miserc.toml: ${UNKNOWN[*]}"
+
+cursor_hide
+SAVE=0
+while :; do
+    draw
+    key="$(read_key)" || key="quit"
+    NOTE=""
+    case "$key" in
+        up) ((CURSOR > 0)) && ((CURSOR--)) || CURSOR=$((${#ALL[@]} - 1)) ;;
+        down) CURSOR=$(((CURSOR + 1) % ${#ALL[@]})) ;;
+        space) toggle "${ALL[$CURSOR]}" ;;
+        all)
+            for p in "${ALL[@]}"; do ON["$p"]=1; done
+            unset "ON[desktop]"
+            NOTE="all selected; desktop cleared (mutually exclusive with laptop)"
+            ;;
+        none) ON=() ;;
+        save)
+            SAVE=1
+            break
+            ;;
+        quit | esc)
+            SAVE=0
+            break
+            ;;
+    esac
+done
+draw
+cursor_show
+trap - EXIT
+printf '\n'
+
+# ─── Save ─────────────────────────────────────────────────────────────────────
+
+if ((SAVE == 0)); then
+    info "Aborted — $MISERC unchanged"
+    exit 0
+fi
+
+# Registry order, not toggle order, so the written line is stable.
+SELECTED=()
+for p in "${ALL[@]}"; do [[ -n "${ON[$p]:-}" ]] && SELECTED+=("$p"); done
+
+ADDED=() REMOVED=()
+for p in ${SELECTED[@]+"${SELECTED[@]}"}; do
+    [[ " ${CURRENT[*]} " == *" $p "* ]] || ADDED+=("$p")
+done
+for p in ${CURRENT[@]+"${CURRENT[@]}"}; do
+    [[ " ${SELECTED[*]} " == *" $p "* ]] || REMOVED+=("$p")
+done
+
+if ((${#ADDED[@]} == 0 && ${#REMOVED[@]} == 0)); then
+    ok "No changes — $MISERC left alone"
+    exit 0
+fi
+
+if ((${#SELECTED[@]} == 0)); then
+    warn "That clears EVERY profile (env = []) — core capability only."
+    read -rp "  Write it? [y/N] " a || a=n
+    [[ "$a" =~ ^[Yy]$ ]] || {
+        info "Aborted — $MISERC unchanged"
+        exit 0
+    }
+fi
+
+env_value="$(
+    printf 'env = ['
+    for i in "${!SELECTED[@]}"; do
+        ((i == 0)) || printf ', '
+        printf '"%s"' "${SELECTED[$i]}"
+    done
+    printf ']'
+)"
+
+mkdir -p "$CONF"
+TMP="$(mktemp "$CONF/.miserc.toml.XXXXXX")" || fail "Could not create a temp file in $CONF"
+# shellcheck disable=SC2064  # expand TMP now, not at trap time
+trap "rm -f '$TMP'" EXIT
+
+if [[ -f "$MISERC" ]] && grep -qE '^[[:space:]]*env[[:space:]]*=' "$MISERC"; then
+    # Replace the env line and NOTHING else — miserc.toml is a real mise rc
+    # file and may carry other settings the user put there.
+    awk -v repl="$env_value" '
+        !done && /^[[:space:]]*env[[:space:]]*=/ { print repl; done = 1; next }
+        { print }
+    ' "$MISERC" >"$TMP"
+elif [[ -f "$MISERC" ]]; then
+    cat "$MISERC" >"$TMP"
+    printf '%s\n' "$env_value" >>"$TMP"
+else
+    printf '%s\n' "# Per-machine profile selection — see miserc.example.toml" >"$TMP"
+    printf '%s\n' "$env_value" >>"$TMP"
+fi
+
+chmod 644 "$TMP"
+mv -f "$TMP" "$MISERC"
+trap - EXIT
+
+ok_changed "$MISERC updated"
+((${#ADDED[@]} == 0)) || ok "added:   ${ADDED[*]}"
+((${#REMOVED[@]} == 0)) || warn "removed: ${REMOVED[*]}"
+info "now: ${SELECTED[*]:-none}"
+
+if ((${#REMOVED[@]} > 0)); then
+    warn "Removing a profile does not uninstall what it already installed, and"
+    warn "'mise run cleanup' only reaps DANGLING links — a deselected profile's"
+    warn "links still point at files that exist, so they are left in place."
+fi
+
+# ─── Converge ─────────────────────────────────────────────────────────────────
+
+have mise || {
+    info "next: mise bootstrap --yes"
+    exit 0
+}
+
+# MISE_ENV is exported into this task from the OLD miserc.toml. A child `mise`
+# would inherit it and re-apply the selection we just replaced, so drop it and
+# let mise re-read the file.
+printf '\n'
+read -rp "  Run 'mise bootstrap --yes' now to apply this? [Y/n] " a || a=n
+if [[ ! "$a" =~ ^[Nn]$ ]]; then
+    info "running mise bootstrap --yes ..."
+    env -u MISE_ENV mise bootstrap --yes || warn "bootstrap exited non-zero — see above"
+else
+    info "skipped; apply later with: mise bootstrap --yes"
+fi
+
+printf '\n'
+info "running mise run cleanup ..."
+env -u MISE_ENV mise run cleanup || warn "cleanup exited non-zero — see above"

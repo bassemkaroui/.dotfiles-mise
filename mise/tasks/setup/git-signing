@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Install ~/.gitconfig.local with the GPG signing block when the key is present"
 #MISE raw=true
+#USAGE flag "--force" help="Rewrite ~/.gitconfig.local from the example (backs the old one up)"
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
@@ -44,10 +45,33 @@ if ! gpg --list-secret-keys "$KEY_ID" &>/dev/null; then
     exit 0
 fi
 
-if [[ -e "$TARGET" ]]; then
-    # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
-    ok "~/.gitconfig.local already present, leaving alone"
+# Mere existence used to end the task, permanently: rotate the signing key,
+# update the example in the companion repo, and this still reported "already
+# present" while git kept signing with the retired key id. Compare the key
+# instead, and say which one is stale — the file itself is left alone either
+# way, because it may carry hand-added local config.
+if [[ -e "$TARGET" ]] && [[ "${usage_force:-false}" != "true" ]]; then
+    CURRENT_KEY="$(git config --file "$TARGET" --get user.signingkey 2>/dev/null || true)"
+    if [[ "$CURRENT_KEY" == "$KEY_ID" ]]; then
+        # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+        ok "~/.gitconfig.local already signs with $KEY_ID"
+    else
+        # shellcheck disable=SC2088  # tilde is literal display text, not a path to expand
+        warn "~/.gitconfig.local signs with ${CURRENT_KEY:-no key}, but the example now says $KEY_ID"
+        warn "Left alone in case it has local edits — adopt the new key with:"
+        warn "    mise run setup:git-signing --force"
+    fi
     exit 0
+fi
+
+# --force past an existing file: keep a copy, since this repo never wrote most
+# of what might be in there.
+if [[ -e "$TARGET" ]]; then
+    BAK="$TARGET.bak"
+    n=1
+    while [[ -e "$BAK" ]]; do BAK="$TARGET.bak$((n++))"; done
+    cp "$TARGET" "$BAK" || fail "Could not back up $TARGET"
+    warn "Backed up the previous ~/.gitconfig.local -> $(basename "$BAK")"
 fi
 
 cp "$EXAMPLE" "$TARGET"

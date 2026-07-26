@@ -65,6 +65,7 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
 | What's out of sync | `mise bootstrap status` |
 | Just the dotfiles | `mise dotfiles status` / `mise dotfiles apply --dry-run` |
 | Recapture a file edited in place | `mise dotfiles add ~/.p10k.zsh` |
+| Add/remove this machine's profiles | `mise run setup:profiles` (space toggles; `--list` to print) |
 | Cloned-repo drift | `mise bootstrap repos status` |
 | Reap links left by removed entries | `mise run cleanup --dry-run` |
 | **Everything CI runs, before you push** | **`mise run repo:lint`** |

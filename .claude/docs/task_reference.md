@@ -75,9 +75,11 @@ so the list is unconditional.
 | 20 | `install:vagrant` | Vagrant (`virt`) |
 | 21 | `install:zen` | Zen browser tarball (`browsers`) — last, it is the largest download |
 
-**Deliberately not chained:** `setup:cosmic-theme`, `setup:cosmic-theme-clean` and
-`setup:hostname` (all menus/prompts), `update:gnome-extensions` (writes *and commits* into
+**Deliberately not chained:** `setup:profiles`, `setup:cosmic-theme`, `setup:cosmic-theme-clean`
+and `setup:hostname` (all menus/prompts), `update:gnome-extensions` (writes *and commits* into
 another git repo — a bootstrap must never do that unattended), and the other `update:*` tasks.
+`setup:profiles` is the sharpest case: it edits the very file that decides which profiles are
+active, so running it inside a converge would change the chain's own inputs midway.
 
 ---
 
@@ -89,6 +91,7 @@ another git repo — a bootstrap must never do that unattended), and the other `
 | `repo:lint` | `--fix` | everything CI runs. Required before any push |
 | `setup:hostname` | `--name <n> --show` | validates the label and keeps `/etc/hosts` in sync |
 | `setup:p10k-icon` | `--icon --show --clear --if-unanswered` | without the flag it always opens the picker; the flag is what makes the chained call once-only |
+| `setup:profiles` | `--list` | the interactive editor for `~/.config/mise/miserc.toml`. `install.sh`'s numbered picker only fires when that file does not yet exist; this is how profiles change on every run after the first. Reads the registry from `install.sh`'s `KNOWN_PROFILES` and the descriptions from `miserc.example.toml`, so a new profile needs no change here. Rewrites only the `env` line, leaving any other setting in the file intact, then offers `mise bootstrap --yes` and runs `cleanup` |
 | `setup:cosmic-theme` | | menu |
 | `setup:cosmic-theme-clean` | | deletes cached themes |
 | `update:repos` | `--check` | updates the clones mise never touches again (the ones with no `ref`) |

@@ -147,7 +147,9 @@ run = [
     { task = "setup:git-signing" },
     { task = "setup:login-shell-fallback" },
     # 4. Asks at most once per machine, and only at a terminal (see the task).
-    { task = "setup:p10k-icon" },
+    #    The flag is what makes it once-only: a bare `mise run setup:p10k-icon`
+    #    always opens the picker, so the icon stays changeable by hand.
+    { task = "setup:p10k-icon --if-unanswered" },
     # 5. Profile-gated installs. Each no-ops without its profile.
     { task = "setup:fonts" },
     { task = "install:ghostty" },

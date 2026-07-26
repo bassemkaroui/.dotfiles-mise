@@ -58,9 +58,16 @@ delta="$(diff "$BASE" "$THEIRS" | grep -cE '^[<>]' || true)"
 # Trial merge into a temp — OURS is never touched until we know the outcome.
 # git merge-file exits 0 on a clean merge, >0 = number of conflicts. The call
 # lives in an `if`, so a non-zero (conflict) exit does not trip `set -e`.
+# -L labels (order: current/base/other = ours/base/theirs) replace the raw file
+# paths in the conflict markers with readable names. The base marker (|||||||)
+# only appears when the reader's git merge.conflictStyle is diff3/zdiff3.
 merged="$(mktemp)"
 trap 'rm -f "$merged"' EXIT
-if git merge-file -p "$OURS" "$BASE" "$THEIRS" >"$merged" 2>/dev/null; then
+if git merge-file -p \
+    -L "ours (your tmux.conf.local)" \
+    -L "base (last-synced upstream template)" \
+    -L "theirs (current upstream ~/.tmux)" \
+    "$OURS" "$BASE" "$THEIRS" >"$merged" 2>/dev/null; then
     clean=true
 else
     clean=false

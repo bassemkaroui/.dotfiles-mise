@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+#MISE description="Install Tailscale from the vendor apt repo (tailscale profile)"
+#MISE raw=true
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:tailscale"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/apt_repo.sh
+source "$LIB/apt_repo.sh"
+
+# Tailscale is a task rather than a [bootstrap.packages] entry for the reason
+# spelled out at the top of lib/apt_repo.sh: its packages live in a vendor repo
+# that mise's apt manager cannot add, and a package apt cannot resolve fails
+# the whole packages step.
+#
+# This task installs the package (whose postinst enables and starts tailscaled,
+# a SYSTEM service — [bootstrap.linux.systemd.units] is user-scope and does not
+# apply). It deliberately does NOT run `tailscale up`: that opens a browser for
+# interactive auth, which would hang an unattended bootstrap, and joining a
+# tailnet is a decision rather than a convergence step. $TAILSCALE_AUTHKEY is
+# honoured when set, which is how a provisioning run joins without a human.
+require_profile tailscale
+
+have apt-get dpkg-query || skip "Not a Debian-family machine"
+
+DO_UPDATE="${usage_update:-false}"
+PKGS=(tailscale)
+
+# Report whether this machine is on a tailnet, and how to join if not. Never
+# fatal: the daemon may still be starting right after a first install.
+report_state() {
+    local status
+    have tailscale || return 0
+    if status="$(tailscale status 2>&1)" && [[ -n "$status" ]]; then
+        ok "Tailnet: $(printf '%s' "$status" | head -1)"
+        return 0
+    fi
+    if [[ -n "${TAILSCALE_AUTHKEY:-}" ]]; then
+        info "Joining the tailnet with \$TAILSCALE_AUTHKEY ..."
+        if sudo_ok && sudo -n tailscale up --auth-key "$TAILSCALE_AUTHKEY"; then
+            ok_changed "Joined the tailnet"
+        else
+            warn "Could not join with \$TAILSCALE_AUTHKEY — join by hand: sudo tailscale up"
+        fi
+        return 0
+    fi
+    info "Not connected. Join this machine to your tailnet with:  sudo tailscale up"
+    info "(interactive — it opens a browser, so the bootstrap does not do it for you)"
+}
+
+mapfile -t MISSING < <(apt_pkg_missing "${PKGS[@]}")
+
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    INSTALLED="$(dpkg-query -W -f='${Version}' tailscale 2>/dev/null || true)"
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        ok "Tailscale $INSTALLED installed"
+        info "(upgrade with: mise run install:tailscale --update)"
+        report_state
+        exit 0
+    fi
+    apt_repo_ensure_known tailscale || skip "Could not add the Tailscale apt repo"
+    apt_pkg_upgrade "${PKGS[@]}" || skip "Could not upgrade Tailscale"
+    ok_changed "Tailscale upgraded ($INSTALLED -> $(dpkg-query -W -f='${Version}' tailscale 2>/dev/null || true))"
+else
+    apt_repo_ensure_known tailscale || skip "Could not add the Tailscale apt repo"
+    apt_pkg_install "${MISSING[@]}" || skip "Could not install: ${MISSING[*]}"
+    ok_changed "Tailscale installed ($(dpkg-query -W -f='${Version}' tailscale 2>/dev/null || true))"
+fi
+
+report_state

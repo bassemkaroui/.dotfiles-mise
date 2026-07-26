@@ -46,6 +46,12 @@ uv = "latest"
 resvg = "latest"
 "github:aristocratos/btop" = "latest"
 hunk = "latest"
+# Encrypted peer-to-peer file transfer.
+croc = "latest"
+# System info banner. Archived upstream — 7.1.0 (2021) is the last release, and
+# mise's registry no longer carries a `neofetch` short name, hence the explicit
+# aqua backend. fastfetch is the maintained successor if this ever stops working.
+"aqua:dylanaraps/neofetch" = "latest"
 # conda-forge git: newer than Ubuntu's, linked against OpenSSL libcurl rather
 # than libcurl-gnutls. The conda backend is self-contained (no conda/mamba needed).
 "conda:git" = "latest"
@@ -150,13 +156,30 @@ run = [
     #    The flag is what makes it once-only: a bare `mise run setup:p10k-icon`
     #    always opens the picker, so the icon stays changeable by hand.
     { task = "setup:p10k-icon --if-unanswered" },
-    # 5. Profile-gated installs. Each no-ops without its profile.
+    # 5. Vendor apt repos, in ONE pass with ONE `apt-get update`, before the
+    #    install tasks that need them. Each of those can add its own repo too
+    #    (they must — they can be run by hand on a machine that never ran this),
+    #    so this is an optimisation, not a dependency: without it a full
+    #    bootstrap would refresh apt metadata six times and prompt for sudo six
+    #    times. It no-ops when no profile needs a vendor repo.
+    { task = "setup:apt-repos" },
+    # 6. Profile-gated installs. Each no-ops without its profile.
     { task = "setup:fonts" },
     { task = "install:ghostty" },
     { task = "install:obsidian" },
     { task = "install:veracrypt" },
     { task = "install:gnome-extensions" },
     { task = "setup:cosmic" },
+    # 7. Vendor-repo apps (docker profile, virt, 1password, browsers,
+    #    tailscale). Ordered cheapest-first; install:zen is last because it is
+    #    the only one that downloads a ~100 MB AppImage.
+    { task = "install:tailscale" },
+    { task = "install:docker" },
+    { task = "install:1password" },
+    { task = "install:brave" },
+    { task = "install:virtualbox" },
+    { task = "install:vagrant" },
+    { task = "install:zen" },
 ]
 # Not in the chain, by design: setup:cosmic-theme, setup:cosmic-theme-clean and
 # update:gnome-extensions. The first two are menus — a chained task does get a

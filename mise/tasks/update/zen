@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#MISE description="Check for and install a newer Zen browser AppImage release"
+#MISE raw=true
+#USAGE flag "--check" help="Report an available update without installing it"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="update:zen"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/zen.sh
+source "$LIB/zen.sh"
+
+# The division of labour with install:zen, which shares lib/zen.sh:
+#   install:zen   runs in the chain; installs when absent, otherwise only
+#                 REPORTS an available upgrade unless given --update, so a
+#                 routine `mise bootstrap` never swaps a running browser's
+#                 binary underneath it.
+#   update:zen    run by hand, when you have decided to upgrade. It never
+#                 installs Zen from scratch — that is install:zen's job, and
+#                 doing it here would resurrect it on a machine that removed it.
+# No require_profile: you may sensibly update a machine whose profile list has
+# since changed. It simply does nothing when Zen isn't installed.
+
+CHECK="${usage_check:-false}"
+
+CURRENT="$(zen_installed_version)"
+if [[ -z "$CURRENT" ]]; then
+    warn "Zen is not installed here — install it with: mise run install:zen"
+    exit 0
+fi
+ok "Zen installed: $CURRENT"
+
+zen_fetch_release || skip "Could not reach the GitHub releases API"
+LATEST="$(zen_latest_version)"
+[[ -n "$LATEST" ]] || skip "Could not determine the latest Zen version"
+
+if [[ "$CURRENT" == "$LATEST" ]]; then
+    ok "Zen is up to date ($CURRENT)"
+    exit 0
+fi
+
+if [[ "$CHECK" == "true" ]]; then
+    info "Zen $LATEST is available (installed: $CURRENT) — run without --check to install"
+    exit 0
+fi
+
+info "Updating Zen $CURRENT → $LATEST"
+zen_install_appimage "$LATEST" "$(zen_appimage_url)"
+ok "Zen updated to $(zen_installed_version)"

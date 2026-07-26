@@ -326,14 +326,16 @@ jobs:
             fi
 
             # --- nothing may write into the repo tree, EXCEPT update:tmux-local ---
-            # It runs in the chain and legitimately folds the upstream oh-my-tmux
-            # template delta into home/.config/tmux/tmux.conf.local (advancing
+            # It runs in the chain and, WHEN the committed base lags the upstream
+            # clone, folds the oh-my-tmux template delta into
+            # home/.config/tmux/tmux.conf.local (advancing
             # vendor/oh-my-tmux/tmux.conf.local, or parking a .merged preview on
-            # conflict). The container ~/.tmux is always ahead of our committed
-            # base, so it MUST have had an effect — assert that, then hold the
-            # REST of the tree to the no-writes rule.
-            tmux_touched="$(git -C "$HOME/.dotfiles-mise" status --porcelain -- home/.config/tmux/tmux.conf.local home/.config/tmux/tmux.conf.local.merged vendor/oh-my-tmux/tmux.conf.local)"
-            [[ -n "$tmux_touched" ]] || err "update:tmux-local did not fold or preview the upstream template delta"
+            # conflict). But once the base is caught up to master — the normal
+            # steady state — it correctly does NOTHING, so we must NOT require it
+            # to have had an effect (that assertion failed exactly when the base
+            # was freshly synced). Just hold everything OTHER than the three
+            # sanctioned tmux paths to the no-writes rule; those are exempt
+            # whether the task wrote them this run or not.
             dirty="$(git -C "$HOME/.dotfiles-mise" status --porcelain -- . ":(exclude)home/.config/tmux/tmux.conf.local" ":(exclude)home/.config/tmux/tmux.conf.local.merged" ":(exclude)vendor/oh-my-tmux/tmux.conf.local")"
             [[ -z "$dirty" ]] || { echo "$dirty"; err "install.sh wrote into the repo working tree (outside the tmux-local paths)"; }
 

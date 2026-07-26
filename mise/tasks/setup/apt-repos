@@ -24,8 +24,8 @@ source "$LIB/apt_repo.sh"
 
 have apt-get dpkg-query || skip "Not a Debian-family machine — no apt repos to add"
 
-# profile -> registry slug. `browsers` covers brave only: Zen is an AppImage
-# and needs no repo.
+# profile -> registry slug. `browsers` covers brave only: Zen installs from an
+# upstream tarball and needs no repo.
 declare -A PROFILE_REPOS=(
     [tailscale]="tailscale"
     [docker]="docker"

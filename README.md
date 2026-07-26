@@ -87,6 +87,7 @@ mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in pl
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise bootstrap repos status      # cloned-repo drift
 mise run cleanup --dry-run       # find symlinks left behind by removed entries
+mise run update:tmux-local       # fold upstream oh-my-tmux template changes into your tmux.conf.local
 mise run repo:lint               # everything CI runs, before you push
 python3 scripts/lint-config.py   # config collision lint (CI runs this via mise run repo:lint)
 python3 scripts/lint-config.py --live   # same, for machine-local ~/.config/mise files
@@ -103,6 +104,7 @@ home/             dotfiles.root — mirrors $HOME, deployed via [dotfiles]
 templates/        template-mode sources ({% if "laptop" in mise_env %}…)
 sandbox/          fake-$HOME verification harness
 scripts/          config collision lint
+vendor/           pristine upstream snapshots (merge base for update:tmux-local)
 docs/upstream/    vendored mise docs (gitignored; docs/fetch.sh refreshes)
 ```
 

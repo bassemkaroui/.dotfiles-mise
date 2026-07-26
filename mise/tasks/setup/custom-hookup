@@ -8,7 +8,7 @@ TASK_NAME="setup:custom-hookup"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# D12 / §7.7. Some configuration must not live in this repo: git identity, ssh
+# Some configuration must not live in this repo: git identity, ssh
 # host names and ports, the GNOME extension manifest. In the old repo that was
 # ~/.dotfiles-custom + `setup:custom-dotfiles` (stow packages, tag-* dirs and an
 # INI tracker). The v2 companion is DATA, not a program — no installer, no
@@ -80,7 +80,7 @@ if [[ ! -d "$CUSTOM_DIR" ]]; then
     # (auth failure, dropped network) leaves a NON-EMPTY directory, which the
     # `-d` test above would then read as "already cloned" forever — and hooking
     # up a half-clone means a config file whose sources are missing, which
-    # aborts every dotfiles apply on the machine (§2.16).
+    # aborts every dotfiles apply on the machine.
     tmp_clone="$CUSTOM_DIR.cloning.$$"
     rm -rf "$tmp_clone"
     # GIT_TERMINAL_PROMPT=0: without credentials git would otherwise sit waiting
@@ -126,10 +126,10 @@ fi
 
 # An UNTRUSTED conf.d drop-in is SILENTLY IGNORED — verified 2026-07-21: with
 # it in place, `mise dotfiles status` exits 0, mentions no trust problem, and
-# the entries simply do not exist. (That is gentler than §2.10's behaviour for
-# the global config, and far more dangerous here: the companion would appear to
-# be wired up and deploy nothing, so setup:git-signing — the very next chain
-# step — would find no ~/.gitconfig.local.example and no-op forever.)
+# the entries simply do not exist. (That is gentler than the error mise raises
+# for the global config, and far more dangerous here: the companion would
+# appear to be wired up and deploy nothing, so setup:git-signing — the very
+# next chain step — would find no ~/.gitconfig.local.example and no-op forever.)
 # install.sh trusts every conf.d file in its own step 6; this task runs at
 # bootstrap step 12, long after that loop, so it must do its own.
 mise trust "$DROPIN" >/dev/null 2>&1 || warn "Could not \`mise trust\` $DROPIN"
@@ -137,9 +137,9 @@ mise trust "$DROPIN" >/dev/null 2>&1 || warn "Could not \`mise trust\` $DROPIN"
 # ─── Validate BEFORE applying ─────────────────────────────────────────────────
 # The drop-in is now loadable by every mise command on this machine, and two of
 # its possible defects are machine-wide rather than local: a key that collides
-# with the main repo resolves by undefined precedence (§2.2), and an entry whose
+# with the main repo resolves by undefined precedence, and an entry whose
 # explicit source is missing aborts the ENTIRE apply — this repo's entries
-# included (§2.16). `lint-config.py --live` checks both. If it fails, take the
+# included. `lint-config.py --live` checks both. If it fails, take the
 # link back out: a companion repo must never be able to break the main one.
 if have python3 && [[ -f "$REPO/scripts/lint-config.py" ]]; then
     lint_rc=0
@@ -162,7 +162,7 @@ fi
 # at bootstrap step 12, on a fresh machine), so it could not have seen these
 # targets. It matters most for ~/.ssh/config: a template-mode entry overwrites
 # a pre-existing real file SILENTLY — no error, no backup — where symlink mode
-# refuses (§2.26, reproduced against a real ~/.ssh/config).
+# refuses (reproduced against a real ~/.ssh/config).
 back_up() {
     local target="$1" expanded bak n=1
     expanded="${target/#\~/$HOME}"
@@ -183,7 +183,7 @@ back_up() {
 # immediately after creating and trusting the drop-in sometimes did not list
 # the new entries at all, while the `dotfiles apply` a few lines later applied
 # them — so the backup silently did nothing and the template-mode ~/.ssh/config
-# was destroyed (§2.26). Reading the file we just linked has no such race, and
+# was destroyed. Reading the file we just linked has no such race, and
 # this is the one moment where being wrong costs a real file.
 # Returns non-zero when it could NOT establish the target list. That
 # distinction is the whole point: "no targets" and "I cannot tell" look
@@ -200,7 +200,7 @@ backup_declared_targets() {
         # `|| continue`, never `&& back_up`: with an empty target list the
         # latter leaves the loop's status at 1, which under `set -e` exits the
         # task — and a non-zero task aborts every later step of the bootstrap
-        # chain (§2.21), taking git-signing and the login-shell fallback with it.
+        # chain, taking git-signing and the login-shell fallback with it.
         [[ -n "$target" ]] || continue
         back_up "$target"
     done <<<"$targets"
@@ -234,7 +234,7 @@ if [[ "$FIRST_LINK" == true ]]; then
     # If the backup pass cannot run, DO NOT APPLY. The drop-in stays linked, so
     # the next `mise bootstrap` on a repaired machine converges — but nothing
     # here is allowed to hand an unprotected apply to template mode, which
-    # replaces a real ~/.ssh/config with no error and no backup (§2.26).
+    # replaces a real ~/.ssh/config with no error and no backup.
     # Without this, a host with no python3 (or with Python < 3.11 and no tomli)
     # lost that file silently while the task printed "OK".
     if ! backup_declared_targets; then

@@ -19,9 +19,9 @@
   `mise_env is defined and …`.
 
   This file is an .example on purpose: the real ~/.ssh/config lives in the
-  PRIVATE custom repo (D12), which is where host names, ports and key paths
+  PRIVATE custom repo, which is where host names, ports and key paths
   belong. Declaring the entry here as well would collide across repos — mise's
-  sibling-config precedence is undefined (§2.2) and scripts/lint-config.py only
+  sibling-config precedence is undefined and scripts/lint-config.py only
   sees this repo.
 
   Template mode renders on every apply and takes permissions from the source

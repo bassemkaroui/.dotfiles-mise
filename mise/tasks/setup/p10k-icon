@@ -48,8 +48,8 @@ unset _probe
 # Port of the old repo's setup:p10k-icon, and the reason the companion repo no
 # longer needs a p10k package at all: its tag-desktop/.p10k.zsh differed from
 # the shared one by exactly ONE line — this icon. A 1700-line copy declared in
-# two repos (undefined precedence, §2.2) is replaced by one line in a
-# machine-local file.
+# two repos (undefined precedence) is replaced by one line in a machine-local
+# file.
 #
 # ~/.zshrc sources ~/.p10k.local.zsh *after* ~/.p10k.zsh, so an override here
 # wins and survives `p10k configure` regenerating the main file.

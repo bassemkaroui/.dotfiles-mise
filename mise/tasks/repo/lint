@@ -16,9 +16,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 # from inside someone else's project is a surprise; `mise run repo:lint` is not.
 #
 # CI calls THIS TASK rather than re-implementing the checks (the old repo kept
-# two copies of the find(1) invocation in sync by hand, and the plan's §0.1
-# "always green before committing" list was a third). One definition, so a file
-# that CI scans is by construction a file `mise run lint` scans.
+# two copies of the find(1) invocation in sync by hand, and a separate
+# "always green before committing" checklist was a third). One definition, so
+# a file that CI scans is by construction a file `mise run lint` scans.
 #
 # Scope, deliberately: the repo's own machinery — tasks, install.sh, the
 # sandbox harness, the doc fetcher, the python scripts. NOT home/: those files
@@ -82,7 +82,7 @@ step_failed() {
     status=1
 }
 
-# ─── 1. Config collision lint (D9/D9a) ────────────────────────────────────────
+# ─── 1. Config collision lint ─────────────────────────────────────────────────
 # Repo mode only. `--live` is deliberately NOT run here: it inspects
 # ~/.config/mise on the machine you happen to be sitting at, which cannot be
 # green until this repo is cut over. install.sh runs it at the moment it

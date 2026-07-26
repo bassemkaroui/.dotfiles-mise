@@ -9,7 +9,7 @@ TASK_NAME="update:repos"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# D11 — the successor to the old repo's `update:submodules`.
+# The successor to the old repo's `update:submodules`.
 #
 # The old repo carried oh-my-tmux and the nvim config as git submodules, so
 # staying current meant bumping a committed pointer. Here they are

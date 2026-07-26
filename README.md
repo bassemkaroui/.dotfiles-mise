@@ -85,6 +85,7 @@ mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
+mise run setup:hostname          # rename this machine, /etc/hosts too (--show / --name)
 mise bootstrap repos status      # cloned-repo drift
 mise run cleanup --dry-run       # find symlinks left behind by removed entries
 mise run update:tmux-local       # fold upstream oh-my-tmux template changes into your tmux.conf.local

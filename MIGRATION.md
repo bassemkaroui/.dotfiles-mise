@@ -30,7 +30,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | ~~fonts + terminal fonts (inside `setup:zsh`)~~ ✅ | `setup:fonts` task (`graphical`) |
 | ~~`setup:completions`, `setup:git-signing`~~ ✅ | ported tasks in `[tasks.bootstrap]` |
 | ~~`setup:zsh` Phase 2 rungs 1/3/4 (sudo chsh, sudo usermod, `exec zsh`)~~ ✅ | `setup:login-shell-fallback` — mise's `[bootstrap.user]` only runs bare `chsh -s` |
-| hostname prompt (`setup:zsh` Phase 6) | dropped — see below |
+| ~~hostname prompt (`setup:zsh` Phase 6)~~ ✅ | `setup:hostname` — standalone and opt-in, not chained (the old one asked on every bootstrap); validates the name and keeps `/etc/hosts` in sync |
 | ~~`install:gnome-extensions`, `update:gnome-extensions`~~ ✅ | `gnome` profile tasks (manifest still supplied by the custom repo) |
 | ~~`setup:cosmic*`~~ ✅ | `cosmic` profile tasks (theme picker is manual, not chained) |
 | ~~`gpg:*` suite~~ ✅ | ported; every mutating path gained a preview/confirm and a pre-import keyring backup |
@@ -50,9 +50,6 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - VeraCrypt default-on → opt-in profile.
 - Fine-grained `.install-exclude` axis (obsidian/ghostty/veracrypt/pathpicker individually) —
   granularity is now per-profile.
-- **Interactive hostname prompt** (`setup:zsh` Phase 6). It asked on every bootstrap and did
-  one `hostnamectl` call; it has nothing to do with dotfiles. Set the hostname with
-  `sudo hostnamectl set-hostname <name>`.
 - **`~/.fzf.bash`.** Shipped by the old `fzf` stow package, but nothing in either repo's
   `.bashrc` ever sourced it, and its `~/.fzf/bin` PATH block refers to an install method
   neither repo uses (fzf is a `[tools]` entry). `~/.fzf.zsh` *is* sourced by `.zshrc` and

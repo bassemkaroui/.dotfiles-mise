@@ -2,6 +2,7 @@
 #MISE description="Add or remove this machine's profiles in miserc.toml (interactive)"
 #MISE raw=true
 #USAGE flag "--list" help="Print the current selection and exit"
+#USAGE flag "--no-converge" help="Only write miserc.toml; skip the bootstrap/cleanup offer"
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
@@ -29,6 +30,11 @@ INSTALL_SH="$REPO/install.sh"
 EXAMPLE="$REPO/mise/miserc.example.toml"
 
 LIST_ONLY="${usage_list:-false}"
+
+# The env fallback is what install.sh uses: it invokes this file by PATH, not
+# through `mise run`, so mise's usage layer never runs and usage_* is unset.
+# Same shape as install:ghostty's GHOSTTY_INSTALL_METHOD fallback.
+NO_CONVERGE="${usage_no_converge:-${PROFILES_NO_CONVERGE:-false}}"
 
 # ─── The registry ─────────────────────────────────────────────────────────────
 
@@ -302,6 +308,13 @@ if ((${#REMOVED[@]} > 0)); then
 fi
 
 # ─── Converge ─────────────────────────────────────────────────────────────────
+
+# install.sh calls this during a first install and runs its OWN two-pass
+# bootstrap at step 7 — converging here would duplicate that (and run before
+# install.sh has finished preparing the machine).
+if [[ "$NO_CONVERGE" == "true" || "$NO_CONVERGE" == "1" ]]; then
+    exit 0
+fi
 
 have mise || {
     info "next: mise bootstrap --yes"

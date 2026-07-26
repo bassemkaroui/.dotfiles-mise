@@ -272,30 +272,38 @@ if [[ -f "$MISERC" ]]; then
 else
     PROFILES="${DOTFILES_PROFILES:-}"
     selected=()
-    if [[ -z "$PROFILES" && "$NONINTERACTIVE" != "1" ]]; then
-        # Numbered multi-select — typing exact profile names is error-prone.
-        printf '\n  Available profiles:\n\n'
-        for i in "${!KNOWN_PROFILES[@]}"; do
-            printf '    %2d) %s\n' "$((i + 1))" "${KNOWN_PROFILES[$i]}"
-        done
-        printf '\n  Numbers for this machine (space-separated), "all", or empty for core only:\n  > '
-        read -r PICKS || PICKS=""
-        if [[ "$PICKS" =~ ^[[:space:]]*[Aa][Ll][Ll][[:space:]]*$ ]]; then
-            selected=("${KNOWN_PROFILES[@]}")
+    PROFILES_TASK="$REPO/mise/tasks/setup/profiles"
+
+    if [[ -z "$PROFILES" && "$NONINTERACTIVE" != "1" && -t 0 && -t 1 && -x "$PROFILES_TASK" ]]; then
+        # One menu, not two: hand off to setup:profiles so the picker here and
+        # the editor used for the rest of the machine's life are the same code.
+        # Called by PATH rather than `mise run` because the [dotfiles] entry
+        # that links mise/tasks into ~/.config/mise is only applied at step 7 —
+        # the task itself only needs lib/profile.sh, which is in-repo.
+        #
+        # PROFILES_NO_CONVERGE: the task otherwise offers to run
+        # `mise bootstrap --yes`, and step 7 below does that properly (twice).
+        info "Choosing profiles (space toggles, s saves, q skips)"
+        MISE_CONFIG_DIR="$CONF" DOTFILES_MISE_REPO="$REPO" PROFILES_NO_CONVERGE=1 \
+            "$PROFILES_TASK" || warn "Profile editor exited non-zero — falling back to core only"
+        if [[ -f "$MISERC" ]]; then
+            # shellcheck disable=SC2088  # tilde is literal display text in a message, not a path
+            ok "~/.config/mise/miserc.toml written: $(grep -E '^env' "$MISERC" || echo '(no env line)')"
         else
-            for n in $PICKS; do
-                if [[ "$n" =~ ^[0-9]+$ ]] && ((n >= 1 && n <= ${#KNOWN_PROFILES[@]})); then
-                    prof="${KNOWN_PROFILES[$((n - 1))]}"
-                    # skip duplicates so `env = [...]` stays clean
-                    [[ " ${selected[*]} " == *" $prof "* ]] || selected+=("$prof")
-                else
-                    warn "Ignoring '$n' — not a number in 1-${#KNOWN_PROFILES[@]}"
-                fi
-            done
+            # Quit without saving. Seed an empty selection so the file exists
+            # and every later step has something to read.
+            {
+                echo "# Per-machine profile selection — see miserc.example.toml"
+                echo 'env = []'
+            } >"$MISERC"
+            warn "No profiles chosen — wrote env = [] (core only)"
+            warn "Change this any time: mise run setup:profiles"
         fi
     else
-        # Non-interactive / DOTFILES_PROFILES override: a name list, kept for
-        # automation. Split on commas and/or whitespace, validate against known.
+        # Non-interactive / DOTFILES_PROFILES override / no TTY: a name list,
+        # kept for automation. Split on commas and/or whitespace, validate
+        # against known. The TUI needs a terminal, so this is also the no-TTY
+        # path — with no list given that means core only, as before.
         for p in ${PROFILES//,/ }; do
             if [[ " ${KNOWN_PROFILES[*]} " == *" $p "* ]]; then
                 selected+=("$p")
@@ -303,21 +311,21 @@ else
                 warn "Unknown profile '$p' — skipping (no config.$p.toml exists; mise would silently ignore it)"
             fi
         done
+        {
+            echo "# Per-machine profile selection — see miserc.example.toml"
+            if [[ ${#selected[@]} -gt 0 ]]; then
+                printf 'env = ['
+                for i in "${!selected[@]}"; do
+                    [[ $i -eq 0 ]] || printf ', '
+                    printf '"%s"' "${selected[$i]}"
+                done
+                printf ']\n'
+            else
+                echo 'env = []'
+            fi
+        } >"$MISERC"
+        ok "Wrote ~/.config/mise/miserc.toml (profiles: ${selected[*]:-none})"
     fi
-    {
-        echo "# Per-machine profile selection — see miserc.example.toml"
-        if [[ ${#selected[@]} -gt 0 ]]; then
-            printf 'env = ['
-            for i in "${!selected[@]}"; do
-                [[ $i -eq 0 ]] || printf ', '
-                printf '"%s"' "${selected[$i]}"
-            done
-            printf ']\n'
-        else
-            echo 'env = []'
-        fi
-    } >"$MISERC"
-    ok "Wrote ~/.config/mise/miserc.toml (profiles: ${selected[*]:-none})"
 fi
 
 # ── 4a. python3 is a hard requirement ─────────────────────────────────────────
@@ -728,7 +736,7 @@ echo
 ok "Done. Day-to-day from any directory:"
 echo "    mise bootstrap status      # what's missing"
 echo "    mise bootstrap --yes       # converge after editing config or profiles"
-echo "    \$EDITOR $MISERC   # change this machine's profiles"
+echo "    mise run setup:profiles    # change this machine's profiles"
 
 # A few tasks are deliberately NOT in the [tasks.bootstrap] chain because they
 # prompt, and would hang an unattended bootstrap. Name them once, here, since
@@ -737,6 +745,7 @@ echo "    \$EDITOR $MISERC   # change this machine's profiles"
 # just wrote it or it pre-existed.
 echo
 ok "Optional manual steps (interactive, so not in the bootstrap chain):"
+echo "    mise run setup:profiles       # add/remove this machine's profiles"
 echo "    mise run setup:hostname       # rename this machine (also fixes /etc/hosts)"
 echo "    mise run setup:p10k-icon      # pick the prompt's OS icon"
 active_profiles=" $(grep -E '^env' "$MISERC" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"' | tr '\n' ' ')"

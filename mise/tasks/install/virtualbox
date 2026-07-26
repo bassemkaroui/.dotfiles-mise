@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#MISE description="Install Oracle VirtualBox from Oracle's apt repo (virt profile)"
+#MISE raw=true
+#USAGE flag "--package <package>" help="Install this exact package instead of the newest Oracle build"
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:virtualbox"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/apt_repo.sh
+source "$LIB/apt_repo.sh"
+
+# Oracle names its packages with the version IN the package name
+# (virtualbox-7.2, virtualbox-7.1, ...), so there is nothing stable to hardcode
+# — this discovers the newest one, filtered to Oracle's own origin. On the
+# author's machine, `apt-cache policy virtualbox-7.2` lists candidates from TWO
+# origins (Oracle 7.2.14 and apt.pop-os.org/proprietary 7.2.2), which is why
+# name-discovery alone is not enough.
+require_profile virt
+
+have apt-get dpkg-query apt-cache || skip "Not a Debian-family machine"
+
+DO_UPDATE="${usage_update:-false}"
+
+# A distro-packaged VirtualBox conflicts with Oracle's build; they are separate
+# packages that own the same kernel modules and /usr paths. Detect one before
+# adding a second.
+DISTRO_VBOX="$(dpkg-query -W -f='${db:Status-Status}' virtualbox 2>/dev/null || true)"
+if [[ "$DISTRO_VBOX" == "installed" ]]; then
+    warn "A distribution VirtualBox package is installed: virtualbox $(dpkg-query -W -f='${Version}' virtualbox 2>/dev/null || true)"
+    warn "Oracle's build is a different package and the two cannot coexist."
+    skip "Remove it first if you want Oracle's: sudo apt-get purge virtualbox"
+fi
+
+# Pick the package: --package wins; otherwise the highest virtualbox-N.M that
+# Oracle's repo actually offers.
+pick_package() {
+    local candidates pkg origin best="" best_key=0 key
+    mapfile -t candidates < <(apt-cache search --names-only '^virtualbox-[0-9]+\.[0-9]+$' 2>/dev/null | awk '{print $1}')
+    for pkg in "${candidates[@]}"; do
+        origin="$(apt-cache policy "$pkg" 2>/dev/null | grep -A1 'Candidate:' | grep -o 'download\.virtualbox\.org' | head -1 || true)"
+        [[ -n "$origin" ]] || continue
+        # Sort numerically on major*1000+minor so virtualbox-7.10 beats
+        # virtualbox-7.9 (a plain string sort does not).
+        key="$(printf '%s' "${pkg#virtualbox-}" | awk -F. '{print $1 * 1000 + $2}')"
+        if ((key > best_key)); then
+            best_key=$key
+            best="$pkg"
+        fi
+    done
+    printf '%s' "$best"
+}
+
+# The repo has to exist before apt-cache can see Oracle's packages.
+apt_repo_ensure_known virtualbox || skip "Could not add the Oracle VirtualBox apt repo"
+
+PKG="${usage_package:-}"
+if [[ -z "$PKG" ]]; then
+    PKG="$(pick_package)"
+    [[ -n "$PKG" ]] || skip "Oracle's repo offers no virtualbox-N.M package for this release — override with --package"
+    ok "Newest Oracle package: $PKG"
+fi
+
+mapfile -t MISSING < <(apt_pkg_missing "$PKG")
+
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    INSTALLED="$(dpkg-query -W -f='${Version}' "$PKG" 2>/dev/null || true)"
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        ok "$PKG $INSTALLED installed"
+        info "(upgrade with: mise run install:virtualbox --update)"
+        apt_add_user_group vboxusers
+        exit 0
+    fi
+    apt_pkg_upgrade "$PKG" || skip "Could not upgrade $PKG"
+    ok_changed "$PKG upgraded ($INSTALLED -> $(dpkg-query -W -f='${Version}' "$PKG" 2>/dev/null || true))"
+else
+    # VirtualBox builds kernel modules through dkms at install time. That needs
+    # matching headers, and on a Secure Boot machine the freshly built modules
+    # are unsigned, so the kernel refuses to load them until the key is
+    # enrolled via MOK — which is interactive and needs a reboot. None of that
+    # can be done unattended, so warn rather than attempt.
+    have dpkg-query && [[ "$(dpkg-query -W -f='${db:Status-Status}' "linux-headers-$(uname -r)" 2>/dev/null || true)" != "installed" ]] \
+        && warn "linux-headers-$(uname -r) is not installed — dkms cannot build the VirtualBox modules"
+    if have mokutil && mokutil --sb-state 2>/dev/null | grep -qi 'enabled'; then
+        warn "Secure Boot is enabled — the dkms modules will be unsigned and refuse to load"
+        warn "You will need to enrol a MOK key and reboot; see /var/lib/dkms/ output after install"
+    fi
+
+    apt_pkg_install "$PKG" || skip "Could not install $PKG"
+    ok_changed "$PKG installed ($(dpkg-query -W -f='${Version}' "$PKG" 2>/dev/null || true))"
+fi
+
+# vboxusers grants raw USB device access to VMs.
+apt_add_user_group vboxusers

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#MISE description="Add the vendor apt repositories this machine's profiles need"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:apt-repos"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/apt_repo.sh
+source "$LIB/apt_repo.sh"
+
+# One pass over every vendor repo whose profile is active, then ONE
+# `apt-get update`. The install:* tasks each know how to add their own repo
+# (they must — they can be run by hand on a machine that never ran this), but
+# on a fresh bootstrap this gets there first, so those calls find the repo
+# already enabled and cost nothing. Without it a full bootstrap would pay for
+# six metadata refreshes and prompt for sudo six times.
+#
+# Runs BEFORE the install tasks in [tasks.bootstrap], and never fails the
+# chain: an unreachable vendor key server is a reason to skip one app, not to
+# lose completions and git signing.
+
+have apt-get dpkg-query || skip "Not a Debian-family machine — no apt repos to add"
+
+# profile -> registry slug. `browsers` covers brave only: Zen is an AppImage
+# and needs no repo.
+declare -A PROFILE_REPOS=(
+    [tailscale]="tailscale"
+    [docker]="docker"
+    [1password]="1password"
+    [browsers]="brave"
+    [virt]="virtualbox vagrant"
+)
+
+wanted=()
+for profile in "${!PROFILE_REPOS[@]}"; do
+    has_profile "$profile" || continue
+    for slug in ${PROFILE_REPOS[$profile]}; do
+        wanted+=("$slug")
+    done
+done
+
+if [[ ${#wanted[@]} -eq 0 ]]; then
+    info "No profile on this machine needs a vendor apt repo"
+    exit 0
+fi
+
+# Sorted so the log order is stable run to run (associative-array iteration
+# order is not).
+mapfile -t wanted < <(printf '%s\n' "${wanted[@]}" | sort -u)
+
+failed=()
+for slug in "${wanted[@]}"; do
+    apt_repo_write "$slug" || failed+=("$slug")
+done
+
+# Refresh once, whatever happened above: a repo that was written before a later
+# one failed still needs metadata.
+apt_repo_refresh || warn "Could not refresh apt metadata — the install tasks will report what is missing"
+
+if [[ ${#failed[@]} -gt 0 ]]; then
+    warn "Could not add: ${failed[*]} — the matching install task will skip and say why"
+fi
+
+ok "Vendor apt repos ready: ${wanted[*]}"

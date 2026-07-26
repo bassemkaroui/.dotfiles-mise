@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#MISE description="Install Vagrant from HashiCorp's apt repo (virt profile)"
+#MISE raw=true
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:vagrant"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/apt_repo.sh
+source "$LIB/apt_repo.sh"
+
+# Vagrant needs a provider to be useful; the `virt` profile pairs it with
+# install:virtualbox, which is the default provider on Linux.
+require_profile virt
+
+have apt-get dpkg-query || skip "Not a Debian-family machine"
+
+DO_UPDATE="${usage_update:-false}"
+PKGS=(vagrant)
+
+mapfile -t MISSING < <(apt_pkg_missing "${PKGS[@]}")
+
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    INSTALLED="$(dpkg-query -W -f='${Version}' vagrant 2>/dev/null || true)"
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        ok "Vagrant $INSTALLED installed"
+        info "(upgrade with: mise run install:vagrant --update)"
+        exit 0
+    fi
+    apt_repo_ensure_known vagrant || skip "Could not add the HashiCorp apt repo"
+    apt_pkg_upgrade "${PKGS[@]}" || skip "Could not upgrade Vagrant"
+    ok_changed "Vagrant upgraded ($INSTALLED -> $(dpkg-query -W -f='${Version}' vagrant 2>/dev/null || true))"
+else
+    apt_repo_ensure_known vagrant || skip "Could not add the HashiCorp apt repo"
+    apt_pkg_install "${MISSING[@]}" || skip "Could not install: ${MISSING[*]}"
+    ok_changed "Vagrant installed ($(dpkg-query -W -f='${Version}' vagrant 2>/dev/null || true))"
+fi
+
+have VBoxManage || warn "No VirtualBox provider found — 'mise run install:virtualbox' installs one"

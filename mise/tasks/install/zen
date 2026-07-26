@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#MISE description="Install the Zen browser (AppImage) — browsers profile"
+#MISE raw=true
+#USAGE flag "--update" help="Upgrade when a newer release exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:zen"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+# shellcheck source=../lib/zen.sh
+source "$LIB/zen.sh"
+
+# Zen publishes no apt repo, so unlike the other five browser-adjacent installs
+# this one takes the AppImage — same route as install:obsidian, and it needs no
+# sudo at all. As with ghostty and obsidian, an available upgrade is reported
+# and only applied with --update, so a routine `mise bootstrap` never swaps a
+# running browser's binary underneath it.
+require_profile browsers
+
+DO_UPDATE="${usage_update:-false}"
+
+CURRENT="$(zen_installed_version)"
+[[ -n "$CURRENT" ]] && ok "Zen installed: $CURRENT"
+
+zen_fetch_release || skip "Could not reach the GitHub releases API"
+LATEST="$(zen_latest_version)"
+[[ -n "$LATEST" ]] || skip "Could not determine the latest Zen version"
+ok "Latest Zen release: $LATEST"
+
+if [[ -n "$CURRENT" ]]; then
+    if [[ "$CURRENT" == "$LATEST" ]]; then
+        ok "Zen is up to date ($CURRENT)"
+        exit 0
+    fi
+    if [[ "$DO_UPDATE" != "true" ]]; then
+        info "Zen $CURRENT installed; $LATEST is available"
+        info "(upgrade with: mise run install:zen --update)"
+        exit 0
+    fi
+    info "Upgrading Zen $CURRENT → $LATEST ..."
+fi
+
+zen_install_appimage "$LATEST" "$(zen_appimage_url)"
+
+[[ -x "$ZEN_BIN" ]] || fail "Zen install finished but $ZEN_BIN is not executable"
+ok "Zen ready: $ZEN_BIN ($(zen_installed_version))"

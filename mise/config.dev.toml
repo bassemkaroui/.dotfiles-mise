@@ -8,3 +8,9 @@
 "npm:corepack" = "latest"
 pre-commit = "latest"
 doppler = { version = "latest", exe = "doppler" }
+
+[bootstrap.packages]
+# Document converter. In `dev` rather than core because it is 190 MB installed
+# (27 MB download — statically linked Haskell): dead weight on a headless box
+# that will never render a document, and paid for on every CI container build.
+"apt:pandoc" = "latest"

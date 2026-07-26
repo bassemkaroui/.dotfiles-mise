@@ -13,6 +13,11 @@
 #   neovim     neovim, tree-sitter-cli, personal nvim config
 #   media      ffmpeg + imagemagick (apt)
 #   veracrypt  VeraCrypt console edition
+#   tailscale  Tailscale VPN (does NOT run `tailscale up` — join by hand)
+#   docker     Docker Engine + lazydocker + dive
+#   1password  1Password desktop app + the `op` CLI
+#   browsers   Brave (apt) + Zen (AppImage)          (implies: graphical)
+#   virt       VirtualBox (Oracle build) + Vagrant
 #   laptop     device marker for template-mode dotfiles (mutually exclusive
 #   desktop    with each other; no standalone config file)
 #

@@ -1,0 +1,11 @@
+# Profile: docker — Docker Engine plus the two TUIs worth having next to it.
+#
+# The engine itself is NOT declared here. Its packages live in Docker's own apt
+# repo, which mise's apt manager cannot add, and an unresolvable
+# [bootstrap.packages] entry fails the whole packages step (step 2) and takes
+# [tasks.bootstrap] with it. install:docker owns that, gated on this profile.
+[tools]
+# Docker TUI: containers, logs, exec, compose stacks.
+lazydocker = "latest"
+# Image layer explorer — what each layer added and how much of it is wasted.
+dive = "latest"

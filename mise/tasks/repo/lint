@@ -211,7 +211,7 @@ if [[ "$FIX" == "true" ]]; then
 elif "$SHFMT" -d -i 4 -ci -bn "${SHELL_FILES[@]}"; then
     ok "shfmt passed"
 else
-    step_failed "shfmt reported diffs (apply with: mise run lint --fix)"
+    step_failed "shfmt reported diffs (apply with: mise run repo:lint --fix)"
 fi
 
 # ─── 4. Syntax check of the deployed rc files ─────────────────────────────────

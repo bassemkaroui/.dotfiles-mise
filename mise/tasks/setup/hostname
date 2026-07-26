@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#MISE description="Set this machine's hostname (interactive; keeps /etc/hosts in sync)"
+#MISE raw=true
+#USAGE flag "--name <name>" help="Set this hostname without prompting"
+#USAGE flag "--show" help="Print the current hostname"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:hostname"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# Deliberately NOT in [tasks.bootstrap]. The old repo ran this as a phase of
+# setup:zsh, so it asked on EVERY bootstrap for a one-shot decision — which is
+# why it was dropped in the port rather than carried over. Standalone it is
+# opt-in, and install.sh names it once at the end.
+#
+# It does one thing the old prompt did not: rewrite the 127.0.1.1 line in
+# /etc/hosts. Debian/Ubuntu carry the hostname there too, and a stale entry
+# makes every later sudo print "unable to resolve host <old>" after waiting on
+# a DNS lookup. Renaming without it is the actual footgun.
+#
+# No require_profile: every machine has a hostname.
+
+CURRENT="$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || echo '')"
+
+if [[ "${usage_show:-false}" == "true" ]]; then
+    info "Hostname: ${CURRENT:-unknown}"
+    exit 0
+fi
+
+have hostnamectl || skip "hostnamectl not found — cannot change the hostname"
+
+NEW="${usage_name:-}"
+
+if [[ -z "$NEW" ]]; then
+    if [[ ! -t 0 ]]; then
+        info "Not a terminal — run 'mise run setup:hostname' to change it (currently: ${CURRENT:-unknown})"
+        exit 0
+    fi
+    printf '\n  Current hostname: %s\n' "${CURRENT:-unknown}"
+    printf '  New hostname (empty keeps it): '
+    read -r NEW
+    if [[ -z "$NEW" ]]; then
+        ok "Hostname unchanged: ${CURRENT:-unknown}"
+        exit 0
+    fi
+fi
+
+# RFC 1123 label: letters, digits and '-', never at either end, 63 max. The old
+# prompt accepted anything and handed it straight to hostnamectl.
+if [[ ! "$NEW" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then
+    fail "Not a valid hostname: '$NEW' (letters, digits and '-', max 63, none at the ends)"
+fi
+
+if [[ "$NEW" == "$CURRENT" ]]; then
+    ok "Hostname already: $NEW"
+    exit 0
+fi
+
+sudo_ok || skip "sudo unavailable — run by hand: sudo hostnamectl set-hostname '$NEW'"
+
+sudo hostnamectl set-hostname "$NEW" || fail "hostnamectl could not set the hostname"
+ok_changed "Hostname set to: $NEW"
+
+# Rewrite ONLY a 127.0.1.1 line whose first name is the host we just renamed.
+# Deliberately narrow: 127.0.1.1 is also where people park local dev names, and
+# more than one such line is normal (the author's box has three). A blanket
+# s/^127\.0\.1\.1.*/ would silently eat those.
+if [[ -n "$CURRENT" ]] && grep -qE "^127\.0\.1\.1[[:space:]]+${CURRENT}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
+    if sudo sed -i "s/^\(127\.0\.1\.1[[:space:]]\+\)${CURRENT}\([[:space:]]\|\$\)/\1${NEW}\2/" /etc/hosts; then
+        ok_changed "/etc/hosts: 127.0.1.1 now points at $NEW"
+    else
+        warn "Could not update /etc/hosts — sudo may warn 'unable to resolve host $CURRENT'"
+    fi
+elif grep -q '^127\.0\.1\.1' /etc/hosts 2>/dev/null; then
+    # Entries exist but none is the canonical one for this host — which is also
+    # what you get on a machine whose hostname drifted from /etc/hosts long ago.
+    # Say so instead of leaving the user to discover it via a slow sudo.
+    warn "/etc/hosts has 127.0.1.1 entries but none names '$CURRENT' — left untouched"
+    warn "If sudo starts warning 'unable to resolve host', add:  127.0.1.1  $NEW"
+else
+    warn "No 127.0.1.1 line in /etc/hosts — add one if sudo complains:  127.0.1.1  $NEW"
+fi
+
+info "Open a new shell for the prompt and \$HOST to catch up"

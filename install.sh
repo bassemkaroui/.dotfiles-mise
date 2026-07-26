@@ -730,12 +730,15 @@ echo "    mise bootstrap --yes       # converge after editing config or profiles
 echo "    \$EDITOR $MISERC   # change this machine's profiles"
 
 # A few tasks are deliberately NOT in the [tasks.bootstrap] chain because they
-# are interactive menus that would hang an unattended bootstrap. Point the user
-# at the ones that apply to the profiles THIS machine selected — reading them
-# back from miserc.toml so it works whether we just wrote it or it pre-existed.
+# prompt, and would hang an unattended bootstrap. Name them once, here, since
+# nothing else will. The profile-gated ones are matched against the profiles
+# THIS machine selected — read back from miserc.toml so this works whether we
+# just wrote it or it pre-existed.
+echo
+ok "Optional manual steps (interactive, so not in the bootstrap chain):"
+echo "    mise run setup:hostname       # rename this machine (also fixes /etc/hosts)"
+echo "    mise run setup:p10k-icon      # pick the prompt's OS icon"
 active_profiles=" $(grep -E '^env' "$MISERC" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"' | tr '\n' ' ')"
 if [[ "$active_profiles" == *" cosmic "* ]]; then
-    echo
-    ok "Manual step for this machine's cosmic profile:"
-    echo "    mise run setup:cosmic-theme   # pick a COSMIC theme (interactive menu)"
+    echo "    mise run setup:cosmic-theme   # pick a COSMIC theme (cosmic profile)"
 fi

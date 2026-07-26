@@ -68,4 +68,9 @@ fi
 # CLI without sudo, and selecting the `docker` profile is the consent.
 apt_add_user_group docker
 
-have docker && ok "Docker ready: $(docker --version 2>/dev/null || echo 'installed')"
+# `if`, not `have docker && ok ...`: as the script's LAST command a false
+# `have` would make the task exit 1 and abort every later member of the
+# bootstrap chain. This is a closing report, not a check that may fail.
+if have docker; then
+    ok "Docker ready: $(docker --version 2>/dev/null || echo 'installed')"
+fi

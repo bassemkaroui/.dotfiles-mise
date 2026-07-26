@@ -15,10 +15,11 @@ source "$LIB/apt_repo.sh"
 
 # Oracle names its packages with the version IN the package name
 # (virtualbox-7.2, virtualbox-7.1, ...), so there is nothing stable to hardcode
-# — this discovers the newest one, filtered to Oracle's own origin. On the
-# author's machine, `apt-cache policy virtualbox-7.2` lists candidates from TWO
-# origins (Oracle 7.2.14 and apt.pop-os.org/proprietary 7.2.2), which is why
-# name-discovery alone is not enough.
+# — this discovers the newest one, filtered to the names Oracle's own repo
+# actually offers. On the author's machine, `apt-cache policy virtualbox-7.2`
+# lists candidates from TWO origins (Oracle 7.2.14 and
+# apt.pop-os.org/proprietary 7.2.2), which is why name-discovery alone is not
+# enough.
 require_profile virt
 
 have apt-get dpkg-query apt-cache || skip "Not a Debian-family machine"
@@ -38,11 +39,22 @@ fi
 # Pick the package: --package wins; otherwise the highest virtualbox-N.M that
 # Oracle's repo actually offers.
 pick_package() {
-    local candidates pkg origin best="" best_key=0 key
+    local candidates pkg policy best="" best_key=0 key
     mapfile -t candidates < <(apt-cache search --names-only '^virtualbox-[0-9]+\.[0-9]+$' 2>/dev/null | awk '{print $1}')
     for pkg in "${candidates[@]}"; do
-        origin="$(apt-cache policy "$pkg" 2>/dev/null | grep -A1 'Candidate:' | grep -o 'download\.virtualbox\.org' | head -1 || true)"
-        [[ -n "$origin" ]] || continue
+        # Does Oracle's repo offer this package name at all? Match anywhere in
+        # the policy output rather than near `Candidate:` — apt-cache prints
+        # origin URLs in the indented version table two to three lines BELOW
+        # the Candidate line (the line right after it is always
+        # "Version table:"), so anchoring on Candidate never matches.
+        #
+        # Capture and pattern-match rather than piping into `grep -q`: grep
+        # exits at the first match, apt-cache then dies of SIGPIPE (141), and
+        # `set -o pipefail` promotes that to a failed pipeline. The skip would
+        # hit exactly the packages whose match is NOT on the last line — i.e.
+        # the newest one, the only one we want.
+        policy="$(apt-cache policy "$pkg" 2>/dev/null || true)"
+        [[ "$policy" == *download.virtualbox.org* ]] || continue
         # Sort numerically on major*1000+minor so virtualbox-7.10 beats
         # virtualbox-7.9 (a plain string sort does not).
         key="$(printf '%s' "${pkg#virtualbox-}" | awk -F. '{print $1 * 1000 + $2}')"

@@ -55,25 +55,31 @@ so the list is unconditional.
 | --- | --- | --- |
 | 1 | `setup:custom-hookup` | clones/links the private companion repo, trusts the drop-in, removes it again if the live lint fails |
 | 2 | `setup:repo-links` | links into `[bootstrap.repos]` clones (oh-my-tmux's `tmux.conf`, `fpp`) — these cannot be `[dotfiles]` entries |
-| 3 | `update:tmux-local` | folds upstream oh-my-tmux template changes into our `tmux.conf.local`; a conflict parks a `.merged` preview instead of breaking anything |
-| 4 | `setup:completions` | generates shell completions into `~/.config/completions` |
-| 5 | `setup:git-signing` | writes `~/.gitconfig.local` from the companion's example when the GPG key is present; compares key IDs, `--force` to adopt a rotated one |
-| 6 | `setup:login-shell-fallback` | the login shell: sudo chsh → sudo usermod → interactive chsh → `exec zsh` in `~/.bash_profile` |
-| 7 | `setup:p10k-icon --if-unanswered` | the one interactive step; asks at most once per machine and only at a terminal |
-| 8 | `setup:apt-repos` | every active profile's vendor apt repos, one pass, one `apt-get update` |
-| 9 | `setup:fonts` | Nerd Font + terminal font (`graphical`) |
-| 10 | `install:ghostty` | terminal (`graphical`); `--method appimage\|deb\|source\|snap` |
-| 11 | `install:obsidian` | AppImage (`graphical`) |
-| 12 | `install:veracrypt` | console `.deb` (`veracrypt`) |
-| 13 | `install:gnome-extensions` | extensions + `dconf` restore (`gnome`) |
-| 14 | `setup:cosmic` | ddcutil/i2c udev rule and group (`cosmic`) |
-| 15 | `install:tailscale` | Tailscale (`tailscale`) — **never runs `tailscale up`** |
-| 16 | `install:docker` | Engine, CLI, containerd, buildx/compose (`docker`) + the `docker` group |
-| 17 | `install:1password` | desktop app (`1password`); the `op` CLI is a `[tools]` entry |
-| 18 | `install:brave` | Brave (`browsers`) |
-| 19 | `install:virtualbox` | Oracle's build (`virt`) + `vboxusers` |
-| 20 | `install:vagrant` | Vagrant (`virt`) |
-| 21 | `install:zen` | Zen browser tarball (`browsers`) — last, it is the largest download |
+| 3 | `setup:repo-remotes` | the *secondary* remotes a `[bootstrap.repos]` entry cannot declare — it records only `origin`, so the nvim config's `upstream` (kickstart) is added here (`neovim`) |
+| 4 | `update:tmux-local` | folds upstream oh-my-tmux template changes into our `tmux.conf.local`; a conflict parks a `.merged` preview instead of breaking anything |
+| 5 | `setup:completions` | generates shell completions into `~/.config/completions` |
+| 6 | `setup:git-signing` | writes `~/.gitconfig.local` from the companion's example when the GPG key is present; compares key IDs, `--force` to adopt a rotated one |
+| 7 | `setup:login-shell-fallback` | the login shell: sudo chsh → sudo usermod → interactive chsh → `exec zsh` in `~/.bash_profile` |
+| 8 | `setup:p10k-icon --if-unanswered` | the one interactive step; asks at most once per machine and only at a terminal |
+| 9 | `setup:apt-repos` | every active profile's vendor apt repos, one pass, one `apt-get update` |
+| 10 | `setup:fonts` | Nerd Font + terminal font (`graphical`) |
+| 11 | `install:ghostty` | terminal (`graphical`); `--method appimage\|deb\|source\|snap` |
+| 12 | `install:obsidian` | AppImage (`graphical`) |
+| 13 | `install:veracrypt` | console `.deb` (`veracrypt`) |
+| 14 | `install:gnome-extensions` | extensions + `dconf` restore (`gnome`) |
+| 15 | `setup:cosmic` | ddcutil/i2c udev rule and group (`cosmic`) |
+| 16 | `install:tailscale` | Tailscale (`tailscale`) — **never runs `tailscale up`** |
+| 17 | `install:docker` | Engine, CLI, containerd, buildx/compose (`docker`) + the `docker` group |
+| 18 | `install:1password` | desktop app (`1password`); the `op` CLI is a `[tools]` entry |
+| 19 | `install:brave` | Brave (`browsers`) |
+| 20 | `install:virtualbox` | Oracle's build (`virt`) + `vboxusers` |
+| 21 | `install:vagrant` | Vagrant (`virt`) |
+| 22 | `install:zen` | Zen browser tarball (`browsers`) — last, it is the largest download |
+
+`setup:repo-remotes` is safe to chain because mise identifies a clone by its `origin` URL **alone**
+(`bootstrap/repos.md`, "Safe updates only"), so an extra remote never turns a repo `conflict`; and
+remote-tracking refs live in `.git`, so its fetch cannot make the worktree `dirty` — which would
+otherwise fail `mise bootstrap` at the repos step, before dotfiles, tools and this entire tail.
 
 **Deliberately not chained:** `setup:profiles`, `setup:cosmic-theme`, `setup:cosmic-theme-clean`
 and `setup:hostname` (all menus/prompts), `update:gnome-extensions` (writes *and commits* into
@@ -94,6 +100,7 @@ active, so running it inside a converge would change the chain's own inputs midw
 | `setup:profiles` | `--list` | the interactive editor for `~/.config/mise/miserc.toml`. `install.sh`'s numbered picker only fires when that file does not yet exist; this is how profiles change on every run after the first. Reads the registry from `install.sh`'s `KNOWN_PROFILES` and the descriptions from `miserc.example.toml`, so a new profile needs no change here. Rewrites only the `env` line, leaving any other setting in the file intact, then offers `mise bootstrap --yes` and runs `cleanup` |
 | `setup:cosmic-theme` | | menu |
 | `setup:cosmic-theme-clean` | | deletes cached themes |
+| `setup:repo-remotes` | `--fetch` | also chained. A newly added remote is always fetched; `--fetch` re-fetches one that already existed. A remote pointing somewhere else is left alone with the `remote set-url` command to adopt this repo's URL |
 | `update:repos` | `--check` | updates the clones mise never touches again (the ones with no `ref`) |
 | `update:tmux-local` | `--check` | also chained |
 | `update:obsidian` | `--check` | installs a newer release; never installs from scratch |

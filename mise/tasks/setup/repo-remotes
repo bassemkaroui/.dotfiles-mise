@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#MISE description="Add the secondary git remotes that [bootstrap.repos] cannot declare (nvim's upstream)"
+#MISE raw=true
+#USAGE flag "--fetch" help="Also fetch a remote that already existed (a new one is always fetched)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="setup:repo-remotes"
+# shellcheck source=../lib/profile.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
+
+# A [bootstrap.repos] entry records exactly one remote — `origin`, from its
+# `url`. There is no way to declare a second one, and the old repo's nvim
+# submodule carried an `upstream` remote pointing at the config it was forked
+# from, so that `git fetch upstream && git log upstream/master` shows what
+# kickstart has changed since. A fresh clone here had only `origin`, forever.
+#
+# Adding a remote is safe for mise: it identifies a clone by its `origin` URL
+# alone (bootstrap/repos.md, "Safe updates only"), so an extra remote never
+# turns a repo `conflict`. And remote-tracking refs live in .git, so a fetch
+# here cannot make the worktree `dirty` — which matters, because a dirty
+# declared clone fails `mise bootstrap` at the repos step.
+#
+# Entries: <path>|<profile>|<remote name>|<url>. Add a line to extend this.
+REMOTES=(
+    "$HOME/.config/nvim|neovim|upstream|https://github.com/nvim-lua/kickstart.nvim.git"
+)
+
+FETCH_EXISTING="${usage_fetch:-false}"
+
+have git || skip "git not found in PATH"
+
+for entry in "${REMOTES[@]}"; do
+    IFS='|' read -r path profile remote url <<<"$entry"
+    name="${path/#$HOME/\~}"
+
+    has_profile "$profile" || continue
+
+    if [[ ! -d "$path/.git" ]]; then
+        warn "$name — not cloned yet, no '$remote' to add (run: mise bootstrap --yes)"
+        continue
+    fi
+
+    current="$(git -C "$path" remote get-url "$remote" 2>/dev/null || true)"
+    if [[ -n "$current" ]]; then
+        if [[ "$current" != "$url" ]]; then
+            # Left alone on purpose: a hand-pointed remote is a deliberate act,
+            # and rewriting it under a bootstrap would be a silent surprise.
+            warn "$name — '$remote' points at $current, not $url; leaving it alone"
+            warn "        adopt this repo's URL with: git -C $path remote set-url $remote $url"
+            continue
+        fi
+        ok "$name — '$remote' already configured"
+        [[ "$FETCH_EXISTING" == "true" ]] || continue
+    else
+        git -C "$path" remote add "$remote" "$url" || {
+            warn "$name — could not add '$remote'"
+            continue
+        }
+        ok_changed "$name — added '$remote' -> $url"
+    fi
+
+    # Offline is not a failure: the remote is configured either way, and the
+    # refs arrive on the next fetch. Never abort the bootstrap chain for this.
+    if git -C "$path" fetch --quiet "$remote" 2>/dev/null; then
+        ok "$name — fetched '$remote'"
+    else
+        info "$name — could not fetch '$remote' (offline?); it is configured, refs come later"
+    fi
+done

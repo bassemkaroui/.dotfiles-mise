@@ -142,6 +142,9 @@ run = [
     { task = "setup:custom-hookup" },
     # 2. Links into [bootstrap.repos] clones (oh-my-tmux config, fpp).
     { task = "setup:repo-links" },
+    # 2a. The remotes a [bootstrap.repos] entry can't declare: it records only
+    #     `origin`, so the nvim config's `upstream` (kickstart) is added here.
+    { task = "setup:repo-remotes" },
     # 2b. Fold upstream oh-my-tmux template changes into our customized
     #     tmux.conf.local. ~/.tmux tracks `master`, so the repos step (which
     #     runs well before this) fast-forwards it every bootstrap; this folds a

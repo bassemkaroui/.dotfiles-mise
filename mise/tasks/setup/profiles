@@ -316,8 +316,48 @@ if [[ "$NO_CONVERGE" == "true" || "$NO_CONVERGE" == "1" ]]; then
     exit 0
 fi
 
+# A profile file that is not yet linked into $CONF is INVISIBLE to the mise
+# process a converge starts. mise resolves its config set once, at startup, and
+# the link is created by the DOTFILES step of that same run — several steps
+# after packages — so a single `mise bootstrap` resolves the OLD profile set and
+# reports the new profile's packages only in a closing hint. (Observed
+# 2026-08-02 adding `latex`: "16 package(s) already installed", then
+# "5 system package(s) ... are missing" at the end of the same run.)
+#
+# install.sh:652 hits this on a first run and answers it the same way: a cheap
+# link-only pass, then the real one. Doing it here too makes the two entry
+# points to a converge behave alike.
+#
+# Per ADDED profile, not once globally, and testing the LINK rather than the
+# repo file:
+#   - a task-only profile (veracrypt, tailscale, laptop, desktop) has no config
+#     file and needs no pass;
+#   - a profile removed earlier and re-added still has its link, because
+#     `mise run cleanup` reaps only DANGLING links and that one still resolves.
+# Removals never need a pass at all: a config file simply stops being loaded at
+# the next startup.
+PRELINK=()
+for p in ${ADDED[@]+"${ADDED[@]}"}; do
+    [[ -f "$REPO/mise/config.$p.toml" ]] || continue
+    [[ -e "$CONF/config.$p.toml" ]] && continue
+    PRELINK+=("$p")
+done
+
+# next_steps <lead-in> — how to converge by hand. Two forms: the one-command
+# form is wrong whenever PRELINK is non-empty, for the reason above.
+next_steps() {
+    if ((${#PRELINK[@]} == 0)); then
+        info "$1: mise bootstrap --yes"
+        return
+    fi
+    info "$1, in TWO commands — mise has not linked the config for ${PRELINK[*]} yet,"
+    info "  and it resolves its config set at startup, so one pass would miss it:"
+    info "    mise bootstrap --only dotfiles --yes   # link the new profile config"
+    info "    mise bootstrap --yes                   # converge with it loaded"
+}
+
 have mise || {
-    info "next: mise bootstrap --yes"
+    next_steps "next"
     exit 0
 }
 
@@ -327,10 +367,21 @@ have mise || {
 printf '\n'
 read -rp "  Run 'mise bootstrap --yes' now to apply this? [Y/n] " a || a=n
 if [[ ! "$a" =~ ^[Nn]$ ]]; then
+    # Link pass first when a new profile config is unlinked, so the converge
+    # below starts a mise that can actually see it. Cheap: dotfiles step only.
+    # A failure here is a warning, not a fail — the converge still runs and
+    # still does everything the old single pass did.
+    if ((${#PRELINK[@]} > 0)); then
+        info "linking new profile config(s) first: ${PRELINK[*]}"
+        info "running mise bootstrap --only dotfiles --yes ..."
+        env -u MISE_ENV mise bootstrap --only dotfiles --yes \
+            || warn "link pass exited non-zero — the converge may not see ${PRELINK[*]}"
+        printf '\n'
+    fi
     info "running mise bootstrap --yes ..."
     env -u MISE_ENV mise bootstrap --yes || warn "bootstrap exited non-zero — see above"
 else
-    info "skipped; apply later with: mise bootstrap --yes"
+    next_steps "skipped; apply later with"
 fi
 
 printf '\n'

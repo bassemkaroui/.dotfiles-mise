@@ -71,6 +71,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `yazi` | yazi + rich preview stack |
 | `neovim` | neovim + tree-sitter + personal nvim config |
 | `media` | ffmpeg + imagemagick (apt) |
+| `latex` | XeLaTeX toolchain (apt), scoped to what the Awesome-CV resume class needs — not `texlive-full`. ~1.9 GB, of which 1.7 GB is `texlive-fonts-extra`, the only package shipping `fontawesome.sty` and `sourcesanspro.sty` |
 | `veracrypt` | VeraCrypt (console) |
 | `tailscale` | Tailscale. Installs and starts the daemon; **never runs `tailscale up`** — joining a tailnet needs a browser, so do it by hand (or set `$TAILSCALE_AUTHKEY`) |
 | `docker` | Docker Engine + CLI + containerd + buildx/compose plugins, plus lazydocker and dive. Adds you to the `docker` group, which is equivalent to root |

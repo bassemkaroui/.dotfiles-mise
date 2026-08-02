@@ -1,0 +1,24 @@
+# Profile: latex — XeLaTeX toolchain, scoped to what the Awesome-CV class needs.
+#
+# Deliberately NOT texlive-full (~5.6 GB): the set below is the transitive
+# closure of awesome-cv.cls's \RequirePackage list, resolved with
+# `apt-file search`, and nothing else. Sizes are apt's Installed-Size.
+#
+# XeLaTeX specifically, not pdflatex: the class pulls in fontspec and
+# unicode-math and loads .ttf files from a \fontdir, none of which pdflatex
+# can do. The .tex files carry `%!TEX TS-program = xelatex` to match.
+[bootstrap.packages]
+# xelatex itself + fontspec.
+"apt:texlive-xetex" = "latest"
+# unicode-math, ragged2e, parskip, etoolbox.
+"apt:texlive-latex-recommended" = "latest"
+# tcolorbox, xifthen, enumitem.
+"apt:texlive-latex-extra" = "latest"
+# fontawesome + sourcesanspro. This is 1.7 GB of the profile's ~1.9 GB, and it
+# is not avoidable by picking a smaller package: it is the ONLY apt package
+# providing either .sty (verified with `apt-file search`). Dropping it costs
+# the CV both its icon font and its body font.
+"apt:texlive-fonts-extra" = "latest"
+# Drives the multi-pass rebuild (footer page numbers need a second run) and
+# keeps the .aux/.log clutter in one place: `latexmk -xelatex <file>.tex`.
+"apt:latexmk" = "latest"

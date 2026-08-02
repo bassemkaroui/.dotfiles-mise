@@ -52,7 +52,7 @@ jobs:
       matrix:
         profiles:
           - ""
-          - "ai,dev,yazi,neovim,media"
+          - "ai,dev,yazi,neovim,media,latex"
           - "graphical,gnome,laptop"
           - "graphical,cosmic,desktop"
           - "veracrypt"
@@ -122,6 +122,7 @@ jobs:
           }
           case "${{ matrix.profiles }}" in *gnome*)  assert_pkg dconf-cli 1 ;; *) assert_pkg dconf-cli 0 ;; esac
           case "${{ matrix.profiles }}" in *cosmic*) assert_pkg ddcutil 1 ;;   *) assert_pkg ddcutil 0 ;; esac
+          case "${{ matrix.profiles }}" in *latex*)  assert_pkg texlive-xetex 1 ;; *) assert_pkg texlive-xetex 0 ;; esac
           assert_pkg zsh 1
           [[ "$fail" == 0 ]] || { echo "$out"; echo "$pkgs"; exit 1; }
       - name: The sandbox must not have written into the repo

@@ -21,8 +21,8 @@ NONINTERACTIVE="${DOTFILES_NONINTERACTIVE:-0}"
 # the script mid-prompt under set -e.
 [[ -t 0 ]] || NONINTERACTIVE=1
 
-KNOWN_PROFILES=(graphical gnome cosmic ai dev yazi neovim media veracrypt
-    tailscale docker 1password browsers virt laptop desktop)
+KNOWN_PROFILES=(graphical gnome cosmic ai dev yazi neovim media latex
+    veracrypt tailscale docker 1password browsers virt laptop desktop)
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }

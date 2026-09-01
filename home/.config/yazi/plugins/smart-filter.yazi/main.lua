@@ -16,7 +16,7 @@ end)
 local function prompt()
 	return ya.input {
 		title = "Smart filter:",
-		pos = { "center", w = 50 }, -- local fix: upstream uses invalid origin "top" (yazi ≥26 rejects it → "Matching variant not found"); centered per preference
+		pos = { "top-center", y = 2, w = 50 },
 		realtime = true,
 		debounce = 0.1,
 	}

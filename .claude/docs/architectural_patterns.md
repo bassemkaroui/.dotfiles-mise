@@ -83,7 +83,7 @@ The other checks it carries: self-management invariants, no relative `[dotfiles]
 "~/.config/mise/tasks"        = { source = "~/.dotfiles-mise/mise/tasks",        mode = "symlink" }
 ```
 
-Add a profile file, run `mise dotfiles apply` from anywhere, and it is linked. Two hard
+Add a profile file, run `mise bootstrap dotfiles apply` from anywhere, and it is linked. Two hard
 requirements (both from real bugs): sources must be **absolute**, and the glob must be
 `config*.toml` rather than `*.toml`.
 
@@ -182,10 +182,11 @@ task regardless: `[bootstrap.users]` needs a literal user name, which a public r
 | `copy` | files a tool rewrites in place | replaces |
 | `template` | per-machine variants | **destroys a pre-existing real file, silently** |
 
-Template mode is the single most dangerous thing in the repo: it replaces the target with no
-error and no backup. `install.sh` moves conflicting real targets aside to `<file>.pre-mise.bak`
-before the first apply, keyed on `mise dotfiles status --json` reporting `differs` — deliberately
-*not* filtered by mode, since the mode that needs it most is the one that doesn't complain.
+Template mode is the single most dangerous thing in the repo: it replaces the target with no error
+and no backup. `install.sh` moves conflicting real targets aside to `<file>.pre-mise.bak` before
+the first apply, keyed on `mise bootstrap dotfiles status --json` reporting `differs` —
+deliberately *not* filtered by mode, since the mode that needs it most is the one that doesn't
+complain.
 
 Template gating must guard against an unconfigured machine:
 

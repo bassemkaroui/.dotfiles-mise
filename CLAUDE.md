@@ -55,7 +55,8 @@ git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise
 
 The clone **must** live at `~/.dotfiles-mise` and use the default `~/.config`: `mise/config.toml`
 names both literally, and `install.sh` refuses rather than half-deploy. After the first run,
-`mise bootstrap` and `mise dotfiles apply` work from any directory with no environment variables.
+`mise bootstrap` and `mise bootstrap dotfiles apply` work from any directory with no environment
+variables.
 
 ## Essential commands
 
@@ -64,8 +65,10 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
 | Full setup / re-converge | `mise bootstrap --yes` |
 | What's out of sync | `mise bootstrap status` |
 | Every declarative resource, in dependency order | `mise bootstrap plan` (`--detailed-exitcode`: 0 converged, 2 pending, 1 unknown) |
-| Just the dotfiles | `mise dotfiles status` / `mise dotfiles apply --dry-run` |
-| Recapture a file edited in place | `mise dotfiles add ~/.p10k.zsh` |
+| Just the dotfiles | `mise bootstrap dotfiles status` / `mise bootstrap dotfiles apply --dry-run` |
+| What would change, current vs desired, per entry | `mise bootstrap dotfiles diff` |
+| Remove an entry (in this order) | `mise bootstrap dotfiles unapply <target>` **first**, then delete the entry |
+| Recapture a file edited in place | `mise bootstrap dotfiles add ~/.p10k.zsh` |
 | Add/remove this machine's profiles | `mise run setup:profiles` (space toggles; `--list` to print) |
 | Cloned-repo drift | `mise bootstrap repos status` |
 | Reap links left by removed entries | `mise run cleanup --dry-run` |
@@ -87,7 +90,7 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
   `scripts/lint-config.py` enforces it.
 - **mise's own config is self-managed.** `mise/config.toml` declares the `[dotfiles]` entries
   that link itself and its profile siblings into `~/.config/mise/`, which stays a **real
-  directory**. Adding a profile file and running `mise dotfiles apply` links it.
+  directory**. Adding a profile file and running `mise bootstrap dotfiles apply` links it.
 - **The chain aborts on failure, so order is policy.** A `{ task = "x" }` member of
   `[tasks.bootstrap].run` that exits non-zero kills every later member. Essential steps run
   first; optional installs run last; anything environmental uses `skip` (warn + exit 0).
@@ -95,6 +98,13 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
   fails the whole packages step at step 2 — before dotfiles, tools and the tail.
 - **Upgrades are opt-in.** First install is unattended; replacing an installed app's binary
   needs `--update`. A routine bootstrap never swaps a running program underneath you.
+- **`mise dotfiles ...` is deprecated; write `mise bootstrap dotfiles ...`.** The old spelling
+  still works on 2026.8.16 (no runtime warning — only `--help` says so), but every call site in
+  this repo uses the new one.
+- **Removal is unapply-first.** `unapply` reads the **live** config, so deleting the entry first
+  leaves it nothing to unapply: the links survive with their sources intact, which means they are
+  not dangling and `mise run cleanup` cannot see them either. mise does prune a `symlink-each`
+  link by itself when the *source file* goes away — that half is handled.
 - **Never `git config --global`.** `~/.gitconfig` is a symlink into this repo and
   `git config --global` follows it, writing into the working tree. Identity goes in
   `~/.gitconfig.identity` (companion repo), signing in `~/.gitconfig.local`.

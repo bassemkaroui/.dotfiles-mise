@@ -72,6 +72,27 @@ Usually this means an entry points at something a later bootstrap step creates. 
 in `setup:repo-links`, where a missing clone is only a warning. `python3 scripts/lint-config.py`
 catches it before you push.
 
+### `failed to locate Git repository for ~/.dotfiles-mise/home/.claude/commands`
+
+The four `symlink-each` entries carry `manifest = "git"`, so mise resolves them with `git ls-files`
+before applying anything. If that command fails, the *whole* apply aborts and nothing deploys —
+`~/.zshrc` included. Two causes:
+
+- **The repo is not a git work tree.** A tarball or a `cp` that dropped `.git`. Re-clone; the
+  documented install path is `git clone`.
+- **`git` itself refuses to start.** Almost always a corrupt `~/.gitconfig`:
+  `fatal: bad config line 1 in file /home/<user>/.gitconfig`. Since `~/.gitconfig` is a symlink
+  into the repo, the damaged file is usually `home/.gitconfig` in the working tree — and git will
+  not run the command that fixes it until you take the broken config out of the picture:
+
+  ```bash
+  GIT_CONFIG_GLOBAL=/dev/null git -C ~/.dotfiles-mise checkout -- home/.gitconfig
+  mise bootstrap dotfiles apply
+  ```
+
+  A `>` redirect into any deployed target does this, `sandbox/mkhome.sh`'s fake `$HOME` included:
+  every target in there is a symlink into the real working tree.
+
 ### A task in the chain failed and everything after it was skipped
 
 By design: a non-zero `{ task = "x" }` member aborts every later member. Find the first failure,
@@ -100,8 +121,8 @@ with it — including the fallback task written for this case.
 ### A profile's settings stopped working after a rename
 
 Removing a `[dotfiles]` entry or renaming a `config.<profile>.toml` leaves a dangling symlink.
-`mise config ls`, `mise dotfiles status` and `mise doctor` all stay quiet about it while the
-profile silently stops applying.
+`mise config ls`, `mise bootstrap dotfiles status` and `mise doctor` all stay quiet about it while
+the profile silently stops applying.
 
 ```bash
 mise run cleanup --dry-run
@@ -109,8 +130,8 @@ mise run cleanup --dry-run
 
 ### A `conf.d/` drop-in has no effect
 
-An **untrusted** drop-in is *silently ignored* — not an error. `mise dotfiles status` exits 0,
-says nothing about trust, and the entries simply do not exist.
+An **untrusted** drop-in is *silently ignored* — not an error. `mise bootstrap dotfiles status`
+exits 0, says nothing about trust, and the entries simply do not exist.
 
 ```bash
 mise trust ~/.config/mise/conf.d/50-custom.toml
@@ -123,14 +144,26 @@ trust loop has run.
 ### A `[dotfiles]` entry never deploys and nothing complains
 
 An entry with **no source** (mirroring `dotfiles.root`) whose file is missing is silently ignored:
-it never deploys, never appears in `mise dotfiles status`, and `--missing` still exits 0. A typo'd
-target is invisible forever with every check green. `lint-config.py` stats every source precisely
-because mise won't.
+it never deploys, never appears in `mise bootstrap dotfiles status`, and `--missing` still exits 0.
+A typo'd target is invisible forever with every check green. `lint-config.py` stats every source
+precisely because mise won't.
 
 ### Deselecting a profile left its files behind
 
 There are no removal semantics, and `cleanup` won't help — the sources still exist, so the links
 aren't dangling. This is a manual delete.
+
+### An entry was deleted from the config and its files are still there
+
+`mise bootstrap dotfiles unapply` reads the **live** config, so once the entry is gone there is
+nothing left to unapply: the next apply says "no dotfiles configured" and every link stays. They
+are not dangling either — the sources still exist — so `mise run cleanup` skips them by design.
+
+The order that works is `mise bootstrap dotfiles unapply <target>` **first** (`--dry-run` prints
+the exact `rm`/`rmdir` list), *then* delete the entry. To fix one after the fact: restore the
+entry, unapply, delete it again — or remove the links by hand. Deleting a *source file* needs none
+of this: mise records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and prunes the leftover
+on the next apply.
 
 ### `mise config ls` shows fewer files than expected
 
@@ -257,13 +290,14 @@ Run everything twice. A `config.local.toml`-being-eaten bug was invisible on a s
 ## Diagnostics worth knowing
 
 ```bash
-mise bootstrap status              # packages, repos, dotfiles, shell, tools
-mise dotfiles status --json        # per-entry state; `differs` is what the backup keys on
-mise bootstrap repos status        # clone drift and dirty clones
-mise config ls                     # which config files actually loaded
-mise trust --show                  # what is trusted
-mise doctor                        # dirs, settings and their source files
-mise tasks                         # every task and its description
+mise bootstrap status                  # packages, repos, dotfiles, shell, tools
+mise bootstrap dotfiles status --json  # per-entry state; `differs` is what the backup keys on
+mise bootstrap dotfiles diff           # current vs desired, per entry
+mise bootstrap repos status            # clone drift and dirty clones
+mise config ls                         # which config files actually loaded
+mise trust --show                      # what is trusted
+mise doctor                            # dirs, settings and their source files
+mise tasks                             # every task and its description
 mise run cleanup --dry-run         # dangling links into this repo
 python3 scripts/lint-config.py --live   # collisions against the machine's conf.d
 ```

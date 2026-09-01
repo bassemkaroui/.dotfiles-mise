@@ -45,7 +45,7 @@ otherwise rather than half-deploy.
    `MISE_GLOBAL_CONFIG_FILE` pointed at the repo — the one-time nudge mise needs before its
    own config is linked into place.
 
-Afterwards `mise bootstrap` and `mise dotfiles apply` work from **any** directory with no
+Afterwards `mise bootstrap` and `mise bootstrap dotfiles apply` work from **any** directory with no
 environment variables: `mise/config.toml` manages itself and its profile siblings into
 `~/.config/mise/` (see "Design rules").
 
@@ -88,14 +88,16 @@ run `mise run cleanup` to reap stale symlinks.
 ```bash
 mise bootstrap status            # everything: packages, repos, dotfiles, shell, tools
 mise bootstrap plan              # the declarative resources, in dependency order
-mise dotfiles status             # just the dotfiles
-mise dotfiles apply --dry-run    # preview
-mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
+mise bootstrap dotfiles status             # just the dotfiles
+mise bootstrap dotfiles apply --dry-run    # preview
+mise bootstrap dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
+mise bootstrap dotfiles diff               # current vs desired, per entry
+mise bootstrap dotfiles unapply <target>   # remove one entry's files — BEFORE deleting the entry
 mise run setup:profiles          # add/remove this machine's profiles (space toggles; --list)
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise run setup:hostname          # rename this machine, /etc/hosts too (--show / --name)
 mise bootstrap repos status      # cloned-repo drift
-mise run cleanup --dry-run       # find symlinks left behind by removed entries
+mise run cleanup --dry-run       # find symlinks left behind by entries removed the other way
 mise run update:tmux-local       # fold upstream oh-my-tmux template changes into your tmux.conf.local
 mise run repo:lint               # everything CI runs, before you push
 python3 scripts/lint-config.py   # config collision lint (CI runs this via mise run repo:lint)
@@ -197,13 +199,20 @@ with template mode.
   cloning repos — so links into `~/.tmux` and `~/.local/opt/PathPicker` are made by the
   `setup:repo-links` task, where a missing clone is only a warning. `scripts/lint-config.py`
   checks every entry's source exists, because mise silently ignores a missing *sourceless*
-  one (it never deploys and `dotfiles status --missing` still exits 0).
+  one (it never deploys and `mise bootstrap dotfiles status --missing` still exits 0).
 - **mise's own config is self-managed.** `mise/config.toml` declares two `[dotfiles]` entries
   (absolute sources, `config*.toml` glob + `tasks`) that link the repo's config into
-  `~/.config/mise/`. Adding a profile file and running `mise dotfiles apply` from anywhere
-  links it. Removing one leaves a dangling link that mise reports nowhere — that's what
+  `~/.config/mise/`. Adding a profile file and running `mise bootstrap dotfiles apply` from
+  anywhere links it. Removing one leaves a dangling link that mise reports nowhere — that's what
   `mise run cleanup` is for.
-- **Never run `mise dotfiles apply --force` / `mise bootstrap --force-dotfiles`.** mise
+- **Removing an entry is `unapply` first, then delete it.** `unapply` reads the live config, so
+  an entry deleted first leaves links mise no longer knows about — and because their sources
+  still exist they are not dangling, so `mise run cleanup` (which only reaps dangling links)
+  cannot help either. Deleting a *source file* is fine: mise prunes the `symlink-each` link it
+  left behind on the next apply.
+- **`mise dotfiles ...` is the deprecated spelling of `mise bootstrap dotfiles ...`.** It still
+  works, but `mise dotfiles --help` now says to use the longer form, and this repo does.
+- **Never run `mise bootstrap dotfiles apply --force` / `mise bootstrap --force-dotfiles`.** mise
   suggests it when it hits a conflict, but on the self-management entries it would overwrite
   the repo's own config files with symlink loops and silently drop the global config. Resolve
   conflicts by moving the offending file aside (which `install.sh` does for you).

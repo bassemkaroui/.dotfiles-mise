@@ -93,7 +93,7 @@ active, so running it inside a converge would change the chain's own inputs midw
 
 | Task | Flags | Notes |
 | --- | --- | --- |
-| `cleanup` | `--dry-run --yes` | removes symlinks that are **both** dangling **and** into this repo. Does not undo a working deployment |
+| `cleanup` | `--dry-run --yes` | removes symlinks that are **both** dangling **and** into this repo. Does not undo a working deployment. Narrower than it used to be: mise now records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and prunes one itself when its source file is deleted, so this task covers what mise still won't — a removed profile's config link, a whole-dir link, a `conf.d` drop-in whose companion clone is gone, and anything orphaned by deleting a `[dotfiles]` entry without `unapply`ing it first (those links are not dangling, so it cannot see them either — see troubleshooting) |
 | `repo:lint` | `--fix` | everything CI runs. Required before any push |
 | `setup:hostname` | `--name <n> --show` | validates the label and keeps `/etc/hosts` in sync |
 | `setup:p10k-icon` | `--icon --show --clear --if-unanswered` | without the flag it always opens the picker; the flag is what makes the chained call once-only |

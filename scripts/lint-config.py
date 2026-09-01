@@ -25,9 +25,9 @@ Modes:
   --live     lint the machine-local config in ~/.config/mise (config*.toml and
              conf.d/*.toml) *against* the repo's keys, so a drop-in can't
              silently collide with core. Also checks that [dotfiles] sources
-             exist — a single missing source aborts every `mise dotfiles
-             apply`. install.sh runs this pass because those files live outside
-             the repo and CI never sees them.
+             exist — a single missing source aborts every `mise bootstrap
+             dotfiles apply`. install.sh runs this pass because those files
+             live outside the repo and CI never sees them.
 
 Exit 0 when clean, 1 with a report when collisions or violations exist.
 """
@@ -90,10 +90,20 @@ NAMESPACES = [
 ]
 
 # mise ignores an unknown mode "with a warning" (dotfiles.md) — the entry is
-# then simply not managed, `dotfiles status --missing` still exits 0, and the
-# file never deploys. A typo in a mode is therefore invisible to every other
-# check in this repo.
+# then simply not managed, `mise bootstrap dotfiles status --missing` still
+# exits 0, and the file never deploys. A typo in a mode is therefore invisible
+# to every other check in this repo.
 VALID_MODES = {"symlink", "symlink-each", "copy", "template"}
+
+# `manifest` (2026.8.x) fails the same silent way, twice over. Measured on
+# 2026.8.16 with a throwaway repo:
+#   manifest = "gti"                 -> unknown manifest 'gti', ignoring entry
+#   manifest = "git", mode = symlink -> manifest requires mode copy or
+#                                       symlink-each, ignoring entry
+# Both are WARNings, both leave `mise bootstrap dotfiles apply` at exit 0
+# reporting "no dotfiles configured", and the target is never created.
+VALID_MANIFESTS = {"git"}
+MANIFEST_MODES = {"copy", "symlink-each"}
 
 
 def flatten_settings(data: dict, prefix: str = "") -> dict:
@@ -232,8 +242,8 @@ def check_modes(rel: str, data: dict, problems: list[str]) -> None:
 
     dotfiles.md: "Unknown modes and operations are ignored with a warning".
     Verified with `mode = "symlink-eachh"`: mise warns once, the target is
-    never created, and `mise dotfiles status --missing` still exits 0 — so
-    nothing else in this repo would notice.
+    never created, and `mise bootstrap dotfiles status --missing` still exits
+    0 — so nothing else in this repo would notice.
     """
     for key, value in extract("dotfiles", data).items():
         if not isinstance(value, dict):
@@ -251,6 +261,37 @@ def check_modes(rel: str, data: dict, problems: list[str]) -> None:
             f"UNKNOWN MODE: [settings] dotfiles.default_mode={default_mode!r} in {rel} — "
             f"expected one of {sorted(VALID_MODES)}"
         )
+
+
+def check_manifests(rel: str, data: dict, problems: list[str]) -> None:
+    """A bad `manifest` is ignored with a warning — like a bad mode.
+
+    Two ways to get it wrong, both verified on 2026.8.16 (see VALID_MANIFESTS):
+    an unrecognised value, and `manifest = "git"` on a mode that does not walk
+    a directory. Either way mise warns once, drops the entry, and still exits
+    0 — so the four symlink-each entries that carry a manifest would quietly
+    stop deploying.
+    """
+    for key, value in extract("dotfiles", data).items():
+        if not isinstance(value, dict):
+            continue  # string shorthand cannot carry a manifest
+        manifest = value.get("manifest")
+        if manifest is None:
+            continue
+        if manifest not in VALID_MANIFESTS:
+            problems.append(
+                f"UNKNOWN MANIFEST: [dotfiles] {key!r} in {rel} has manifest={manifest!r} — "
+                f"mise ignores the entry with a warning and it never deploys. "
+                f"Expected one of {sorted(VALID_MANIFESTS)}"
+            )
+            continue
+        mode = value.get("mode", flatten_settings(data).get("dotfiles.default_mode"))
+        if mode not in MANIFEST_MODES:
+            problems.append(
+                f"MANIFEST/MODE MISMATCH: [dotfiles] {key!r} in {rel} has manifest={manifest!r} "
+                f"with mode={mode!r} — mise ignores the entry with a warning and it never "
+                f"deploys. A manifest needs one of {sorted(MANIFEST_MODES)}"
+            )
 
 
 def check_sources(rel: str, data: dict, problems: list[str]) -> None:
@@ -294,10 +335,10 @@ def check_repo_sources(rel: str, data: dict, problems: list[str], live: bool = F
     mise to complain (both verified on 2026.7.7):
 
       - an entry with an EXPLICIT source that doesn't exist aborts the whole
-        `dotfiles apply` — every other dotfile with it, not just that entry;
+        `mise bootstrap dotfiles apply` — every other dotfile with it, not just that entry;
       - an entry with NO source (the mirrored `dotfiles.root` path) whose file
         is missing is silently dropped: it never deploys, never appears in
-        `mise dotfiles status`, and `status --missing` still exits 0. A typo in
+        `mise bootstrap dotfiles status`, and `status --missing` still exits 0. A typo in
         a target path therefore produces a permanently unmanaged file with all
         checks green.
 
@@ -321,9 +362,9 @@ def check_repo_sources(rel: str, data: dict, problems: list[str], live: bool = F
                 # let a source pointing anywhere outside the repo pass every
                 # check this repo has. Verified: `source =
                 # "/opt/definitely-not-here/somerc"` in config.graphical.toml
-                # linted OK, passed both sandbox arms and `dotfiles status`
-                # rc=0, and only failed on a real apply — where it
-                # takes every other dotfile down with it.
+                # linted OK, passed both sandbox arms and `mise bootstrap
+                # dotfiles status` rc=0, and only failed on a real apply — where
+                # it takes every other dotfile down with it.
                 #
                 # It is also a design rule (README): no source may point at
                 # something a bootstrap step creates. A path outside the repo
@@ -459,10 +500,12 @@ def main() -> int:
         # Self-management applies in both modes — machine-local drop-ins are the least
         # reviewed files on the box, so they get the same check.
         check_self_managed(path, rel, data, problems)
-        # Both modes: a relative source and an unknown mode are wrong wherever
-        # they are declared, and neither produces an error from mise.
+        # Both modes: a relative source, an unknown mode and a bad manifest are
+        # wrong wherever they are declared, and none produces an error from
+        # mise.
         check_relative_sources(rel, data, problems)
         check_modes(rel, data, problems)
+        check_manifests(rel, data, problems)
         # check_repo_sources covers sourceless entries (silently dropped by
         # mise) and in-repo ones; check_sources covers absolute/machine paths,
         # which only exist — and can only be stat'ed — on a real machine.

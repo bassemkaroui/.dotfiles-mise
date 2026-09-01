@@ -5,14 +5,33 @@
 #USAGE flag "--dry-run" help="Only report what would be removed"
 set -euo pipefail
 
-# mise keeps no state database: removing a [dotfiles] entry (or renaming a
-# config.<profile>.toml) leaves its symlink in place, pointing at a source that
-# no longer exists. Nothing reports this — `mise config ls`, `dotfiles status`
-# and `doctor` all stay quiet while the profile's settings silently stop
-# applying. This task is the missing reaper.
+# What mise's own removal path does and does not cover — both halves measured
+# on 2026.8.16 in a throwaway $HOME:
+#
+#   - It DOES track symlink-each links, in $MISE_STATE_DIR/dotfiles/<hash>.toml
+#     (source, target, one [[links]] block per file). Delete a source file — or
+#     drop it from the git manifest — and the next `mise bootstrap dotfiles
+#     apply` removes the link it left behind, keeping the directory. The
+#     "mise keeps no state database" this comment used to open with was wrong;
+#     mise_behaviours #8 has been corrected.
+#   - It does NOT cover removing the ENTRY. `mise bootstrap dotfiles unapply`
+#     reads the LIVE config, so deleting the entry first leaves it nothing to
+#     unapply: the next apply prints "no dotfiles configured" and every link
+#     stays — source intact, so not even dangling. The supported order is
+#     therefore `mise bootstrap dotfiles unapply <target>` FIRST, then delete
+#     the entry.
+#
+# This task is the reaper for what is left over: links whose SOURCE is gone — a
+# renamed or removed config.<profile>.toml, a whole-dir link from a profile that
+# is no longer loaded, a conf.d drop-in whose companion clone was deleted — plus
+# anything orphaned before the unapply-first rule was written down. Nothing else
+# reports those: `mise config ls`, `mise bootstrap dotfiles status` and `doctor`
+# all stay quiet while the profile's settings silently stop applying.
 #
 # It only ever removes symlinks that (a) are dangling and (b) point into this
-# repo. Real files, and links to anything else, are never touched.
+# repo. Real files, and links to anything else, are never touched. A link whose
+# source still exists is never stale by this definition, which is exactly why
+# the unapply-first rule matters.
 
 REPO="${DOTFILES_MISE_REPO:-$HOME/.dotfiles-mise}"
 CONF="${MISE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/mise}"
@@ -104,12 +123,14 @@ while IFS= read -r -d '' link; do
     [[ -e "$link" ]] || stale+=("$link")
 done < <(
     find "$HOME" -maxdepth 1 -type l -print0 2>/dev/null
-    # ~/.claude and ~/.gnupg hold managed links too (per-file, D8). ~/.claude
-    # matters most: commands/ is symlink-each, the mode where a per-file link is
-    # left dangling the moment a source file is deleted from the repo.
-    # ~/.themes holds the gnome profile's whole-dir theme links — the clearest
-    # case of the removal problem this task exists for: drop the profile and
-    # the links stay, pointing at a config file mise no longer loads.
+    # ~/.claude and ~/.gnupg hold managed links too (per-file, D8). The
+    # symlink-each dirs under ~/.claude are the least likely to need us now
+    # that mise prunes a deleted source's link itself (see the header), but a
+    # machine that never runs another apply still has them, and a copy-mode
+    # entry is never pruned at all. ~/.themes holds the gnome profile's
+    # whole-dir theme links — the clearest case of the removal problem this
+    # task exists for: drop the profile and the links stay, pointing at a
+    # config file mise no longer loads.
     for d in "$HOME/.config" "$HOME/.local/share" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.gnupg" "$HOME/.themes"; do
         # -path prune: ~/.local/share/mise is mise's whole tool tree (tens of
         # thousands of files, none of them ours) and ~/.claude/projects is

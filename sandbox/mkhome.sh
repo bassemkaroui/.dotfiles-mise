@@ -2,14 +2,27 @@
 # Build a throwaway $HOME and run mise commands against this repo WITHOUT
 # touching the real home directory or writing anything into the repo.
 #
+# That guarantee covers what MISE does in here. It does NOT cover what a test
+# does afterwards: every deployed target in this $HOME is a symlink into the
+# real repo (through $HOME/.dotfiles-mise, itself a symlink to it), so a plain
+# redirect writes STRAIGHT INTO THE WORKING TREE —
+#
+#   echo drift > "$SANDBOX/home/.gitconfig"    # clobbers repo home/.gitconfig
+#
+# — which is the same footgun as `git config --global` on a symlinked
+# ~/.gitconfig, and it cost a `git checkout -- home/.gitconfig` to undo (with
+# GIT_CONFIG_GLOBAL=/dev/null, because git itself would no longer start). To
+# simulate drift, `rm` the link and let it dangle, or write to a target this
+# repo does not manage.
+#
 # Usage:
 #   sandbox/mkhome.sh [--keep] [--two-pass] [--profiles "graphical,ai,dev"] [--] [mise args...]
 #
 # Default action is `mise bootstrap status`; pass extra args to run something
 # else, e.g.:
-#   sandbox/mkhome.sh -- dotfiles apply --dry-run
+#   sandbox/mkhome.sh -- bootstrap dotfiles apply --dry-run
 #   sandbox/mkhome.sh --profiles graphical,gnome -- bootstrap --only dotfiles --dry-run
-#   sandbox/mkhome.sh --two-pass --profiles gnome -- dotfiles status
+#   sandbox/mkhome.sh --two-pass --profiles gnome -- bootstrap dotfiles status
 #
 # --two-pass mirrors install.sh's real first run: link the config family with
 # `bootstrap --only dotfiles` under MISE_GLOBAL_CONFIG_FILE, then drop the

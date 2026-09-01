@@ -4,9 +4,9 @@
 Used by install.sh and mise/tasks/setup/custom-hookup to decide what to back up
 BEFORE the companion repo's drop-in is applied for the first time.
 
-Why this exists rather than `mise dotfiles status --json`: the status view of a
+Why this exists rather than `mise bootstrap dotfiles status --json`: the status view of a
 drop-in that was created moments earlier proved unreliable — in repeated
-sandbox runs it omitted the new entries while the `dotfiles apply` immediately
+sandbox runs it omitted the new entries while the `mise bootstrap dotfiles apply` immediately
 afterwards honoured them. The entry that gets missed is the template-mode
 `~/.ssh/config`, and template mode replaces a pre-existing real file with no
 error and no backup. Reading the file we just linked has no such

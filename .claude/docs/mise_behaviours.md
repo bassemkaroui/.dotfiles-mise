@@ -6,7 +6,7 @@ claimed. **Re-verify on a mise version bump.** `sandbox/mkhome.sh` gives you a t
 to do it in.
 
 Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
-(entries 8, 11, 18 and 25 changed; 32-33 are new).
+(entries 8, 11, 18 and 25 changed; 32-36 are new).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -64,10 +64,11 @@ undiscoverable, if repo-directory inertness ever matters.
   later mise call exit non-zero — which, under `pipefail`, killed `install.sh`. It now trusts
   each `config*.toml` and `conf.d/*.toml` individually.
 - An untrusted **global** config is a hard error.
-- An untrusted **`conf.d/` drop-in is silently ignored** — `mise dotfiles status` exits 0, says
-  nothing about trust, and the drop-in's entries simply do not exist. This is what the companion
-  repo would hit on a fresh machine, where the drop-in is created near the end of the bootstrap
-  chain, long after `install.sh`'s trust loop. `setup:custom-hookup` therefore trusts it itself.
+- An untrusted **`conf.d/` drop-in is silently ignored** — `mise bootstrap dotfiles status` exits
+  0, says nothing about trust, and the drop-in's entries simply do not exist. This is what the
+  companion repo would hit on a fresh machine, where the drop-in is created near the end of the
+  bootstrap chain, long after `install.sh`'s trust loop. `setup:custom-hookup` therefore trusts it
+  itself.
 - A pre-existing real `~/.config/mise/config.toml` (any machine that used mise before) errors as
   untrusted once `MISE_GLOBAL_CONFIG_FILE` points elsewhere — the override appears to demote the
   normal global config out of implicit trust. `install.sh` backs it up before the first run.
@@ -82,8 +83,8 @@ undiscoverable, if repo-directory inertness ever matters.
   do not exist`, and *nothing* deploys — not the other thirty entries, not `.zshrc`. One bad
   entry takes the whole machine down.
 - **No source** (mirrored `dotfiles.root` path) and the file is missing → **silently ignored**.
-  It never deploys, never appears in `mise dotfiles status`, and `--missing` still exits 0. A
-  typo'd target is invisible forever with every check green.
+  It never deploys, never appears in `mise bootstrap dotfiles status`, and `--missing` still exits
+  0. A typo'd target is invisible forever with every check green.
 
 **Consequences:** no entry may point at something an earlier bootstrap step creates — the
 first-run pass applies dotfiles *before* cloning repos, so an entry into a clone bricks a fresh
@@ -98,7 +99,7 @@ overwrite existing files". Template mode also replaces a symlink without comment
 never data to mise.
 
 `install.sh`'s conflict backup therefore must not filter on mode (it did once; fixed). It keys
-on `mise dotfiles status --json` reporting `state: differs`.
+on `mise bootstrap dotfiles status --json` reporting `state: differs`.
 
 ### 8. Removal is explicit, and only for entries you still declare
 
@@ -112,10 +113,10 @@ which state belongs to an entry".
 The gap that remains is the one this repo actually hits: **unapply reads the live config**, so it
 cannot help once the entry is gone. Removing a `[dotfiles]` entry, or renaming a
 `config.<profile>.toml`, still leaves the symlink in place pointing at a source that no longer
-exists, and `mise config ls`, `mise dotfiles status` and `mise doctor` all decline to mention it
-while the profile silently stops applying. The order that works is **unapply first, then delete
-the entry**; the `cleanup` task is the reaper for everything already orphaned, and only removes
-links that are both dangling and pointing into this repo.
+exists, and `mise config ls`, `mise bootstrap dotfiles status` and `mise doctor` all decline to
+mention it while the profile silently stops applying. The order that works is **unapply first, then
+delete the entry**; the `cleanup` task is the reaper for everything already orphaned, and only
+removes links that are both dangling and pointing into this repo.
 
 Note what `cleanup` does **not** do: deselecting a profile leaves its already-deployed files
 alone, because the source still exists. That is a manual delete.
@@ -124,7 +125,7 @@ alone, because the source still exists. That is a manual delete.
 
 `mise/config.toml` declares the entries that link itself and its siblings into `~/.config/mise/`.
 Globs expand per-file and pick up new files on re-apply — verified by adding a profile file and
-running `mise dotfiles apply` from an unrelated directory.
+running `mise bootstrap dotfiles apply` from an unrelated directory.
 
 - Sources **must be absolute**. A relative source resolves against the declaring file's
   directory, which after linking is `~/.config/mise` — i.e. self-referential entries that never
@@ -176,9 +177,9 @@ Inside `[bootstrap.hooks]` it is unset, and hook `run` strings are not template-
 
 ### 14. `mise_env` is *undefined*, not empty, when no profiles are selected
 
-`env = []` is the shipped default, and `"x" in mise_env` on undefined is a hard Tera render
-error: `` `in` cannot be used on a container of type `undefined` ``. A template that fails to
-render aborts the **entire** `mise dotfiles apply`, so sibling symlink entries don't deploy
+`env = []` is the shipped default, and `"x" in mise_env` on undefined is a hard Tera render error:
+`` `in` cannot be used on a container of type `undefined` ``. A template that fails to render
+aborts the **entire** `mise bootstrap dotfiles apply`, so sibling symlink entries don't deploy
 either.
 
 Every profile-gated template must guard: `{% if mise_env is defined and "laptop" in mise_env %}`.
@@ -435,3 +436,62 @@ holds an exclusive lock for as long as it runs, so mise will not run another com
 The lock is per *command*, not per task, so two raw tasks can still interleave between their
 individual commands. Every file task in this repo is `raw=true`; the `[tasks.bootstrap]` chain is
 sequential anyway, so nothing here depended on the old advice.
+
+### 34. `manifest = "git"` makes `git ls-files` a hard dependency of the *whole* apply
+
+The four `symlink-each` entries (`~/.claude/{commands,skills,agents}`, `~/.git-template/hooks`)
+carry `manifest = "git"`, so mise walks `git ls-files` in the source directory instead of the
+filesystem and the repo's index is the only filter. Measured on 2026.8.16 in a throwaway `$HOME`:
+a stray untracked `home/.claude/commands/zz.md` is linked without the manifest (3 files) and
+skipped with it (2), a link an earlier apply left behind is pruned on the next apply, and a
+tracked file deleted from the repo takes its link with it while the directory stays.
+
+The cost is that the manifest is resolved before **anything** is applied, and a failure there
+aborts the entire step — not just that entry:
+
+```
+mise ERROR failed to locate Git repository for ~/.dotfiles-mise/home/.claude/commands:
+           fatal: not a git repository (or any of the parent directories): .git
+```
+
+Nothing deployed in that run, `~/.zshrc` included. Two ways to trigger it: the repo is not a git
+work tree (a tarball copy rather than a clone — the documented install path is a clone, so this is
+accepted), or **`git` itself refuses to start**, which a corrupt `~/.gitconfig` does:
+`fatal: bad config line 1 in file /home/<user>/.gitconfig`. That one was hit for real. Recovery is
+`rm ~/.gitconfig` (or restore the source) and re-run; until then git needs
+`GIT_CONFIG_GLOBAL=/dev/null` to run at all, including the `git checkout --` that fixes the source.
+
+A bad `manifest` value is the same silent class as a bad `mode` (behaviour #6): `manifest = "gti"`
+→ `unknown manifest 'gti', ignoring entry`; `manifest = "git"` on `mode = "symlink"` →
+`manifest requires mode copy or symlink-each, ignoring entry`. Both are WARNings, both leave the
+apply at exit 0 saying "no dotfiles configured", and the target is never created.
+`scripts/lint-config.py` (`check_manifests`) rejects both, and CI asserts the filter still filters.
+
+### 35. One `brew-cask` entry makes even the read-only commands network-dependent
+
+Tested with `"brew-cask:font-fira-code-nerd-font" = "latest"` in a throwaway `$HOME`. The cask is
+real and Linux font casks do install into `~/.local/share/fonts` — but the entry is resolved
+against `formulae.brew.sh` on **every** command that touches `[bootstrap.packages]`, including the
+ones that install nothing:
+
+| command | online | offline (proxy refused) |
+| --- | --- | --- |
+| `mise bootstrap packages status` | `missing` | 3 retries, then exit 1 |
+| `mise bootstrap plan --detailed-exitcode` | 2 (changes pending) | 1 (planning failed) |
+
+A single unresolvable token is fatal to the whole plan, not just its own entry
+(`font-totally-bogus-nope` → 404 → nothing planned at all). That would make `bootstrap status`
+useless offline and would make CI's `plan --detailed-exitcode` gate report "a resource is unknown"
+whenever the network hiccups. Fonts therefore stay in `setup:fonts`, which runs last, is gated on
+the `graphical` profile, and `skip`s on a failed download. See also behaviour #32: `brew` creates
+`/home/linuxbrew/.linuxbrew` with sudo, and packages are step 2 — before dotfiles and tools.
+
+### 36. `mise dotfiles` is deprecated in favour of `mise bootstrap dotfiles`
+
+`mise dotfiles --help` on 2026.8.16 opens with "Manage dotfiles from `[dotfiles]` (deprecated) —
+use `mise bootstrap dotfiles` instead". The old spelling still works and prints no warning at
+runtime, so nothing broke; every call site in this repo (install.sh, CI, `sandbox/mkhome.sh`, the
+docs) uses the new one. Flags are identical across the two spellings: `status -J/--json/--missing`,
+`apply -n/-y/-f`, `add --changed/-m/-s/-p/-g/-l/--no-apply`. The subcommand list also gained
+`diff` (current vs desired, per entry — a file count for `symlink-each`), `unapply` (see #8) and
+`edit`.

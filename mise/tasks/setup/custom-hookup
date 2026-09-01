@@ -124,12 +124,12 @@ else
     ok_changed "Linked $DROPIN → $SOURCE_CONF"
 fi
 
-# An UNTRUSTED conf.d drop-in is SILENTLY IGNORED — verified 2026-07-21: with
-# it in place, `mise dotfiles status` exits 0, mentions no trust problem, and
-# the entries simply do not exist. (That is gentler than the error mise raises
-# for the global config, and far more dangerous here: the companion would
-# appear to be wired up and deploy nothing, so setup:git-signing — the very
-# next chain step — would find no ~/.gitconfig.local.example and no-op forever.)
+# An UNTRUSTED conf.d drop-in is SILENTLY IGNORED — verified 2026-07-21: with it
+# in place, `mise bootstrap dotfiles status` exits 0, mentions no trust problem,
+# and the entries simply do not exist. (That is gentler than the error mise
+# raises for the global config, and far more dangerous here: the companion would
+# appear to be wired up and deploy nothing, so setup:git-signing — the very next
+# chain step — would find no ~/.gitconfig.local.example and no-op forever.)
 # install.sh trusts every conf.d file in its own step 6; this task runs at
 # bootstrap step 12, long after that loop, so it must do its own.
 mise trust "$DROPIN" >/dev/null 2>&1 || warn "Could not \`mise trust\` $DROPIN"
@@ -178,18 +178,18 @@ back_up() {
 # On the run that FIRST links the drop-in, read the companion's targets
 # straight out of its TOML rather than asking mise.
 #
-# Why not `mise dotfiles status` here: it proved unreliable at exactly this
-# moment. In repeated sandbox runs of this task, the status call issued
-# immediately after creating and trusting the drop-in sometimes did not list
-# the new entries at all, while the `dotfiles apply` a few lines later applied
-# them — so the backup silently did nothing and the template-mode ~/.ssh/config
-# was destroyed. Reading the file we just linked has no such race, and
-# this is the one moment where being wrong costs a real file.
-# Returns non-zero when it could NOT establish the target list. That
-# distinction is the whole point: "no targets" and "I cannot tell" look
-# identical to a caller that only checks output, and the second one must never
-# be allowed to reach the apply. Exit codes: 3 = no TOML parser (Python < 3.11
-# without tomli — stock Ubuntu 22.04), 4 = unreadable/malformed config.
+# Why not `mise bootstrap dotfiles status` here: it proved unreliable at exactly
+# this moment. In repeated sandbox runs of this task, the status call issued
+# immediately after creating and trusting the drop-in sometimes did not list the
+# new entries at all, while the `mise bootstrap dotfiles apply` a few lines
+# later applied them — so the backup silently did nothing and the template-mode
+# ~/.ssh/config was destroyed. Reading the file we just linked has no such race,
+# and this is the one moment where being wrong costs a real file. Returns
+# non-zero when it could NOT establish the target list. That distinction is the
+# whole point: "no targets" and "I cannot tell" look identical to a caller that
+# only checks output, and the second one must never be allowed to reach the
+# apply. Exit codes: 3 = no TOML parser (Python < 3.11 without tomli — stock
+# Ubuntu 22.04), 4 = unreadable/malformed config.
 backup_declared_targets() {
     have python3 || return 1
     [[ -f "$REPO/scripts/dotfiles-targets.py" ]] || return 1
@@ -211,7 +211,7 @@ backup_declared_targets() {
 # drift detection there.
 backup_differing() {
     have python3 || return 0
-    { mise dotfiles status --json 2>/dev/null || true; } \
+    { mise bootstrap dotfiles status --json 2>/dev/null || true; } \
         | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()
@@ -254,15 +254,15 @@ fi
 # it. ssh then refuses the file ("Bad owner or permissions").
 #
 # Fix the SOURCE, not the rendered file. Chmod'ing mise's output instead makes
-# `mise dotfiles status` report `differs (permissions differ)` forever — the
-# target no longer matches the source — so `status --missing` exits 1 and every
-# apply rewrites the mode back. CI caught exactly that loop — and then caught
-# it a second time when the chmod ran AFTER the apply: the target kept the
-# clone's 0664 while the source became 0600, which is the same mismatch with
-# the operands swapped. It has to happen BEFORE mise renders anything.
-# mkdir before chmod: in the bootstrap chain the pre-dotfiles hook already made
-# ~/.ssh 0700, but this task is reachable standalone (see the header), where at
-# umask 002 a chmod of a missing dir no-ops and `mise dotfiles apply` then
+# `mise bootstrap dotfiles status` report `differs (permissions differ)` forever
+# — the target no longer matches the source — so `status --missing` exits 1 and
+# every apply rewrites the mode back. CI caught exactly that loop — and then
+# caught it a second time when the chmod ran AFTER the apply: the target kept
+# the clone's 0664 while the source became 0600, which is the same mismatch with
+# the operands swapped. It has to happen BEFORE mise renders anything. mkdir
+# before chmod: in the bootstrap chain the pre-dotfiles hook already made ~/.ssh
+# 0700, but this task is reachable standalone (see the header), where at umask
+# 002 a chmod of a missing dir no-ops and `mise bootstrap dotfiles apply` then
 # creates ~/.ssh at 0775 — group-writable, which ssh rejects.
 mkdir -p "$HOME/.ssh" 2>/dev/null || true
 chmod 700 "$HOME/.ssh" 2>/dev/null || true
@@ -282,9 +282,9 @@ fi
 # step (setup:git-signing) reads ~/.gitconfig.local.example, which this repo
 # deploys. Verified that a chained task can apply within the same bootstrap and
 # the next step sees the result.
-if mise dotfiles apply --yes >/dev/null 2>&1 || mise dotfiles apply >/dev/null 2>&1; then
+if mise bootstrap dotfiles apply --yes >/dev/null 2>&1 || mise bootstrap dotfiles apply >/dev/null 2>&1; then
     ok "Applied the companion repo's dotfiles"
 else
-    warn "\`mise dotfiles apply\` failed after linking the companion repo"
-    warn "(run it by hand to see why: mise dotfiles status)"
+    warn "\`mise bootstrap dotfiles apply\` failed after linking the companion repo"
+    warn "(run it by hand to see why: mise bootstrap dotfiles status)"
 fi

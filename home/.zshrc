@@ -245,7 +245,7 @@ fi
 
 # ── Prompt (Powerlevel10k) ────────────────────────────────────────────────────
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh — then recapture
-# with: mise dotfiles add ~/.p10k.zsh
+# with: mise bootstrap dotfiles add ~/.p10k.zsh
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 # Per-machine p10k tweaks (e.g. OS icon override). Sourced after .p10k.zsh so
 # it survives `p10k configure` regenerations.

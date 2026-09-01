@@ -37,7 +37,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 | ~~`update:submodules` + submodule-freshness workflow~~ ✅ | `update:repos` task + `scripts/check-repos.py` + a monthly *notifier* workflow (there is no committed pointer left to bump, so the old PR shape does not transfer) |
 | ~~`update:obsidian`~~ ✅ | ported (`--check`); `install:obsidian` reports, `update:obsidian` installs |
 | ~~`lint` (shellcheck/shfmt)~~ ✅ | `repo:lint` — namespaced, and widened to config lint + shellcheck + shfmt + `bash -n`/`zsh -n`; CI calls the task rather than re-deriving the file set |
-| ~~p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`)~~ ✅ | run `p10k configure`, then `mise dotfiles add ~/.p10k.zsh` to recapture (README "Day-to-day"); the per-device icon is `setup:p10k-icon` → `~/.p10k.local.zsh` |
+| ~~p10k wizard lifecycle (`setup:p10k-configure`, `sync_custom_p10k`)~~ ✅ | run `p10k configure`, then `mise bootstrap dotfiles add ~/.p10k.zsh` to recapture (README "Day-to-day"); the per-device icon is `setup:p10k-icon` → `~/.p10k.local.zsh` |
 | ~~`~/.dotfiles-custom` + `setup:custom-dotfiles`~~ ✅ | companion repo v2 (`~/.dotfiles-custom-mise`): data only, one `conf.d/50-custom.toml` drop-in — see [CUSTOM.md](CUSTOM.md) |
 | ~~git config: aliases, delta, lfs, credential helpers, `.git-completion.bash`, `.git-prompt.sh`, `.git-template/`~~ ✅ | **moved out of the custom repo** into `home/` — none of it is private |
 | ~~git identity (`user.name`/`user.email`)~~ ✅ | companion repo → `~/.gitconfig.identity`, pulled in by an `[include]` |
@@ -72,7 +72,7 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 - **`.custom-packages` + `setup:custom-dotfiles`.** The INI tracker, the tag directories, the
   `recurse_dirs` no-fold handling and the unstow-restore path were all stow bookkeeping. Adding a
   private file is now `cp` plus one line in `mise/config.custom.toml` (CUSTOM.md), or
-  `mise dotfiles add`.
+  `mise bootstrap dotfiles add`.
 - **Most of `install:build-deps`.** The old task installed `autoconf automake libtool clang
   libclang-dev nasm yasm libjpeg/png/tiff/webp/freetype/fontconfig/ltdl-dev python3-pip
   libssl-dev libevent-dev libncurses-dev perl` — a source-build toolchain for the stow and zsh
@@ -107,8 +107,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
 
 ### Known mise limitations we compensate for
 - No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc. Renaming or deleting a
-  `config.<profile>.toml` leaves a dangling link in `~/.config/mise` that nothing reports
-  (`config ls`, `dotfiles status` and `doctor` all stay silent) while that profile quietly
+  `config.<profile>.toml` leaves a dangling link in `~/.config/mise` that nothing reports (`config
+  ls`, `mise bootstrap dotfiles status` and `doctor` all stay silent) while that profile quietly
   stops applying — run `mise run cleanup` after any such change.
 - `--force` is never safe here: on the self-management entries it replaces the repo's own
   config files with symlink loops and silently drops the global config. `install.sh` moves
@@ -136,8 +136,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   step creates: `~/.config/tmux/tmux.conf` → `~/.tmux/.tmux.conf` and `~/.local/bin/fpp` are
   symlinked by the `setup:repo-links` task instead, where a missing clone is just a warning.
 - **A *sourceless* entry whose mirrored source is missing is silently ignored** — it never
-  deploys, never appears in `mise dotfiles status`, and `status --missing` still exits 0. A
-  typo'd target is therefore invisible; `scripts/lint-config.py` checks every entry's source
+  deploys, never appears in `mise bootstrap dotfiles status`, and `status --missing` still exits 0.
+  A typo'd target is therefore invisible; `scripts/lint-config.py` checks every entry's source
   exists in the repo to compensate.
 - **mise creates missing parent directories with the process umask** (0755/0775), which gpg
   rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
@@ -156,11 +156,11 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   would have prevented the write mechanically but silently reverts any local
   `git config --global` on the next apply, which was judged the worse surprise.
 - **`mode = "template"` overwrites a pre-existing real file silently** — no error, no backup,
-  where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target,
-  not just symlink-mode ones, and additionally backs up every target the companion repo
-  declares before its first apply (keyed on the config file, not on `mise dotfiles status`,
-  whose view of a just-created drop-in proved unreliable). This is why the cutover backup tar
-  matters even though mise "shouldn't" clobber anything.
+  where `mode = "symlink"` refuses. `install.sh` therefore backs up every *differing* target, not
+  just symlink-mode ones, and additionally backs up every target the companion repo declares before
+  its first apply (keyed on the config file, not on `mise bootstrap dotfiles status`, whose view of
+  a just-created drop-in proved unreliable). This is why the cutover backup tar matters even though
+  mise "shouldn't" clobber anything.
 - **apt's git is linked against `libcurl-gnutls`, which truncates large packs over HTTP/2 on
   some networks** — `RPC failed; curl 56 GnuTLS recv error (-24)`, `early EOF`,
   `fetch-pack: invalid index-pack output`. It bites at bootstrap step 2, where

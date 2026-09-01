@@ -65,13 +65,13 @@ jobs:
       # --two-pass on BOTH of these, not just the assertion step below.
       # MISE_GLOBAL_CONFIG_FILE suppresses config.<profile>.toml, so a
       # single-pass run resolves CORE ONLY — which made four of the five matrix
-      # arms byte-identical to the core arm: `dotfiles apply --dry-run` hashed
+      # arms byte-identical to the core arm: `mise bootstrap dotfiles apply --dry-run` hashed
       # the same for "", "graphical,gnome,laptop" and "ai,dev,yazi,neovim,media".
       # Anything broken inside a profile file was invisible to this whole job.
       - name: bootstrap status
         run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap status
       - name: dotfiles apply --dry-run
-        run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
+        run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap dotfiles apply --dry-run
       - name: No unresolvable resource in the plan
         # `mise bootstrap plan` (2026.8.x) resolves every declarative resource —
         # accounts, packages, privileged files/directories, services, firewall,
@@ -102,7 +102,7 @@ jobs:
           # No `|| true` on the capture: if the harness itself fails, this job
           # must fail. An earlier draft swallowed it, and with want=0 for four
           # of the five arms that made them pass while asserting nothing.
-          out="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles status)"
+          out="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap dotfiles status)"
           [[ -n "$out" ]] || { echo "::error::dotfiles status produced no output"; exit 1; }
           fail=0
           # Every arm asserts in BOTH directions: the profile's own entries are
@@ -118,7 +118,7 @@ jobs:
           # links every profile file into ~/.config/mise regardless of which
           # profiles are active, so that entry is present on every arm. CI
           # caught this on its first real run. The gnome profile's only
-          # remaining content is an apt package, which `dotfiles status` cannot
+          # remaining content is an apt package, which `mise bootstrap dotfiles status` cannot
           # see — it is asserted from `bootstrap status` below.
           case "${{ matrix.profiles }}" in
             *graphical*) assert_count ghostty '~/\.config/ghostty/' 2 ;;
@@ -131,7 +131,7 @@ jobs:
           # Core entries must be present on every arm, including the empty one.
           assert_count core-zshrc '~/\.zshrc' 1
           # Package-only profiles (gnome → dconf-cli, cosmic → ddcutil) show up
-          # in `bootstrap status`, not in `dotfiles status`.
+          # in `bootstrap status`, not in `mise bootstrap dotfiles status`.
           pkgs="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap status)"
           assert_pkg() {  # <name> <expected 0|1>
             local have=0
@@ -146,6 +146,42 @@ jobs:
           case "${{ matrix.profiles }}" in *latex*)  assert_pkg texlive-xetex 1 ;; *) assert_pkg texlive-xetex 0 ;; esac
           assert_pkg zsh 1
           [[ "$fail" == 0 ]] || { echo "$out"; echo "$pkgs"; exit 1; }
+      - name: The git manifest is the filter, not the filesystem
+        # `manifest = "git"` on the four symlink-each entries makes mise walk
+        # `git ls-files` instead of the source directory, so an untracked file
+        # sitting next to a managed one must NOT deploy. Nothing else in this
+        # job would notice the manifest being dropped: the entry keeps working,
+        # it just silently starts deploying whatever is lying around.
+        #
+        # Single-pass and core-arm only, against the grain of every other step
+        # here — for two reasons. ~/.claude/commands is a CORE entry, so
+        # MISE_GLOBAL_CONFIG_FILE suppressing the profile files costs nothing;
+        # and --two-pass APPLIES the dotfiles in its first pass, after which
+        # `diff` prints "all files are applied" and there is no count left to
+        # assert. Unapplied is the state that reports one.
+        #
+        # `mise bootstrap dotfiles diff` reports it as "desired symlink-each: N files", which
+        # is the whole assertion — no --keep, no sandbox path to parse.
+        # Measured on 2026.8.16: 2 files with the manifest, 3 without.
+        #
+        # No `set -e`: the stray file has to be removed before the
+        # working-tree-clean step below, whatever the run did.
+        if: matrix.profiles == ''
+        run: |
+          set -uo pipefail
+          stray=home/.claude/commands/zz-ci-untracked.md
+          printf 'untracked, must not deploy\n' > "$stray"
+          out="$(sandbox/mkhome.sh -- bootstrap dotfiles diff 2>&1)"
+          rc=$?
+          rm -f "$stray"
+          echo "$out"
+          [[ $rc -eq 0 ]] || { echo "::error::dotfiles diff failed (rc=$rc) with an untracked file in home/.claude/commands"; exit 1; }
+          got="$(grep -A1 'dotfile differs: ~/\.claude/commands$' <<<"$out" | sed -n 's/.*symlink-each: \([0-9]*\) files.*/\1/p')"
+          [[ "$got" == 2 ]] || {
+            echo "::error::~/.claude/commands would deploy ${got:-?} files, expected 2 — the git manifest is not filtering"
+            exit 1
+          }
+
       - name: The sandbox must not have written into the repo
         # sandbox/mkhome.sh symlinks the REAL repo into the fake $HOME, so
         # anything that writes "into ~/.dotfiles-mise" lands in the working
@@ -529,5 +565,5 @@ jobs:
             export PATH="$HOME/.local/bin:$PATH"
             mise bootstrap status            # human-readable, for the log
             mise bootstrap status --missing  # and this one actually fails
-            mise dotfiles status --missing
+            mise bootstrap dotfiles status --missing
           '

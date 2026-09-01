@@ -383,12 +383,12 @@ fi
 # on `state: differs`, which a freshly-rendered file does not have. Same
 # reasoning as the task's FIRST_LINK gate.
 #
-# Keyed on the companion's config file rather than on `mise dotfiles status`:
-# the status view of a just-created drop-in proved unreliable — observed in
-# repeated sandbox runs of setup:custom-hookup, where status omitted the new
-# entries while the apply moments later honoured them — and the entry it would
-# miss is the template-mode ~/.ssh/config, which overwrites a real file with no
-# error and no backup.
+# Keyed on the companion's config file rather than on `mise bootstrap dotfiles
+# status`: the status view of a just-created drop-in proved unreliable —
+# observed in repeated sandbox runs of setup:custom-hookup, where status omitted
+# the new entries while the apply moments later honoured them — and the entry it
+# would miss is the template-mode ~/.ssh/config, which overwrites a real file
+# with no error and no backup.
 backup_companion_targets() {
     [[ -n "${LINKED_DROPIN:-}" ]] || return 0
     local target expanded bak n old_hit
@@ -397,10 +397,11 @@ backup_companion_targets() {
         expanded="${target/#\~/$HOME}"
         [[ -e "$expanded" && ! -L "$expanded" ]] || continue
         # Self-guard, not just the caller's guard_old_repo: that one enumerates
-        # via `mise dotfiles status`, which can omit this drop-in's entries, so
-        # it may not have vetted this exact target. mv-ing a file that resolves
-        # into an old repo would move it INTO the rollback path, and applying
-        # would overwrite it there — the one thing this script must never do.
+        # via `mise bootstrap dotfiles status`, which can omit this drop-in's
+        # entries, so it may not have vetted this exact target. mv-ing a file
+        # that resolves into an old repo would move it INTO the rollback path,
+        # and applying would overwrite it there — the one thing this script must
+        # never do.
         if old_hit="$(target_resolves_into_old_repo "$target")"; then
             die "Companion target $target resolves into an old stow repo ($old_hit).
        Unstow the old repo(s) first (MIGRATION.md step 3), then re-run — backing
@@ -502,9 +503,9 @@ old_repo_reals() {
 # repo? Echoes the resolved old-repo path and returns 0 on a match; returns 1
 # otherwise. Shared by guard_old_repo and backup_companion_targets — the latter
 # needs its OWN check because it reads the companion's targets straight from the
-# TOML (not from `mise dotfiles status`, which is unreliable for a just-created
-# drop-in and can hide exactly the template-mode ~/.ssh/config that must never
-# be mv'd into the old repo).
+# TOML (not from `mise bootstrap dotfiles status`, which is unreliable for a
+# just-created drop-in and can hide exactly the template-mode ~/.ssh/config that
+# must never be mv'd into the old repo).
 target_resolves_into_old_repo() {
     local target="$1" expanded probe resolved r
     expanded="${target/#\~/$HOME}"
@@ -539,7 +540,7 @@ guard_old_repo() {
         fi
     done < <(
         # [dotfiles] targets …
-        { mise dotfiles status --json 2>/dev/null || true; } \
+        { mise bootstrap dotfiles status --json 2>/dev/null || true; } \
             | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()
@@ -609,7 +610,7 @@ backup_conflicts() {
     command -v python3 &>/dev/null || return 0
     # `|| true`: a status failure must not kill the script via pipefail — the
     # backup pass is best-effort, and bootstrap below reports the real problem.
-    { mise dotfiles status --json 2>/dev/null || true; } \
+    { mise bootstrap dotfiles status --json 2>/dev/null || true; } \
         | python3 -c '
 import json, sys
 raw = sys.stdin.read().strip()

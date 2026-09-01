@@ -19,7 +19,7 @@ bootstrap logic — just files plus one small config file that says where they g
 `mise/config.custom.toml` is symlinked to `~/.config/mise/conf.d/50-custom.toml`,
 where mise loads it alongside this repo's config **once it is trusted**. That
 last part is not a formality: an untrusted drop-in is *silently ignored* — no
-prompt, no error, `mise dotfiles status` exits 0 and simply does not list its
+prompt, no error, `mise bootstrap dotfiles status` exits 0 and simply does not list its
 entries — so the companion would look wired up and deploy nothing. Both entry
 points below run `mise trust` on it. Two things create the link, deliberately:
 
@@ -53,7 +53,7 @@ Each of these is a way to break **every** machine, not just the companion:
    `install.sh` and `setup:custom-hookup` run it, and the task *removes the link
    again* if it fails.
 3. **Every source must exist whenever the config file is loaded.** A missing
-   explicit source aborts the **entire** `dotfiles apply` — this repo's entries
+   explicit source aborts the **entire** `mise bootstrap dotfiles apply` — this repo's entries
    included, machine-wide. The reverse is harmless: if the companion clone is
    deleted outright, mise just omits the dangling drop-in and everything else
    applies. The dangerous state is *drop-in present, source missing*.
@@ -113,7 +113,7 @@ A file that differs per machine is **one** template branching on the profiles in
 that selected no profiles — `env = []`, the shipped default — `mise_env` is
 *undefined*, not an empty array, and `"laptop" in mise_env` on undefined is a
 hard render error (`` `in` cannot be used on a container of type `undefined` ``).
-A template that fails to render aborts the **entire** `mise dotfiles apply` —
+A template that fails to render aborts the **entire** `mise bootstrap dotfiles apply` —
 every other dotfile with it, machine-wide (verified 2026-07-22). Guard every
 `in mise_env` test.
 
@@ -122,7 +122,7 @@ every other dotfile with it, machine-wide (verified 2026-07-22). Guard every
 > **Template mode overwrites a pre-existing real file silently** — no error, no
 > backup, where `mode = "symlink"` refuses. Both entry points therefore back up
 > first, keyed on `config.custom.toml`'s own target list (via
-> `scripts/dotfiles-targets.py`) rather than on `mise dotfiles status`, whose
+> `scripts/dotfiles-targets.py`) rather than on `mise bootstrap dotfiles status`, whose
 > view of a just-created drop-in proved unreliable. **If that list cannot be
 > read — no `python3`, or Python < 3.11 without `tomli` — neither entry point
 > applies anything at all**: an unprotected apply is worse than an unapplied
@@ -146,7 +146,7 @@ main repo's `~/.gitconfig`. Set them by editing that file:
 	email = you@example.com
 ```
 
-then `mise run setup:custom-hookup` (or just `mise dotfiles apply`).
+then `mise run setup:custom-hookup` (or just `mise bootstrap dotfiles apply`).
 
 **Do not use `git config --global user.email …` on these machines.** The main
 repo's `~/.gitconfig` is deployed as a symlink, and `git config --global`

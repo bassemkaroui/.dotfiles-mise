@@ -2,8 +2,9 @@
 # and its profile siblings into ~/.config/mise/, which stays a REAL directory so
 # per-machine state (miserc.toml, conf.d/ drop-ins) lives outside the repo.
 # install.sh breaks the chicken-and-egg on a first run with
-#   MISE_GLOBAL_CONFIG_FILE=~/.dotfiles-mise/mise/config.toml mise bootstrap
-# after which plain `mise bootstrap` / `mise dotfiles apply` work from any cwd.
+# MISE_GLOBAL_CONFIG_FILE=~/.dotfiles-mise/mise/config.toml mise bootstrap after
+# which plain `mise bootstrap` / `mise bootstrap dotfiles apply` work from any
+# cwd.
 #
 # This file owns ALL structure shared by every machine; profile files
 # (config.<profile>.toml) only ADD capability and never redeclare a key that
@@ -105,12 +106,12 @@ jq = "latest"
 #
 # These do NOT replace the pre-dotfiles hook below, they double it. Measured on
 # 2026.8.16 from a deliberately-wrong 0755: the files step (bootstrap step 3)
-# converges these to 0700 under a full `mise bootstrap`, under
-# `--only files,dotfiles`, and under `mise bootstrap files apply` — but it is
-# SKIPPED by `mise bootstrap --only dotfiles` (install.sh's link-only first
-# pass, and sandbox/mkhome.sh's) and by a standalone `mise dotfiles apply`,
-# both of which ended at 0755 while still running the hook. The hook covers
-# those two paths; these entries cover reporting.
+# converges these to 0700 under a full `mise bootstrap`, under `--only
+# files,dotfiles`, and under `mise bootstrap files apply` — but it is SKIPPED by
+# `mise bootstrap --only dotfiles` (install.sh's link-only first pass, and
+# sandbox/mkhome.sh's) and by a standalone `mise bootstrap dotfiles apply`, both
+# of which ended at 0755 while still running the hook. The hook covers those two
+# paths; these entries cover reporting.
 #
 # 0700 is therefore stated twice, here and in the hook. Change both together.
 [bootstrap.directories."~/.gnupg"]
@@ -277,17 +278,40 @@ run = [
 # Claude Code. Per-file, never a whole-dir link — ~/.claude also holds
 # credentials, project history and local state. commands/ is symlink-each so
 # machine-local commands can live alongside the managed ones.
+#
+# manifest = "git" (here and on ~/.git-template/hooks): mise walks
+# `git ls-files` in the source directory instead of the filesystem, so this
+# repo's index — and therefore .gitignore — is the single filter. Anything
+# untracked under home/.claude/ is now neither committed nor deployed, which
+# is the same defense-in-depth the /home/.claude/* ignore block buys, applied
+# to the deploy side. Measured in a throwaway $HOME: a stray
+# home/.claude/commands/zz.md is linked without the manifest, skipped with it,
+# and a link an earlier apply left behind is pruned on the next apply.
+#
+# Two costs, both accepted:
+#   - a NEW file must be `git add`ed before an apply will link it;
+#   - the source must be a real git work tree. With no .git, mise fails with
+#     "failed to locate Git repository" and the ENTIRE apply aborts — not one
+#     entry is applied, ~/.zshrc included. Fine here: the documented install
+#     path is a git clone (install.sh already shells out to git), but it does
+#     mean a tarball copy of this repo can no longer deploy anything.
 "~/.claude/settings.json" = { mode = "symlink" }
 "~/.claude/keybindings.json" = { mode = "symlink" }
 "~/.claude/CLAUDE.md" = { mode = "symlink" }
 "~/.claude/statusline-command.sh" = { mode = "symlink" }
 "~/.claude/.editorconfig" = { mode = "symlink" }
-"~/.claude/commands" = { mode = "symlink-each" }
+"~/.claude/commands" = { mode = "symlink-each", manifest = "git" }
 # Empty in the old repo too, but tracked (and whitelisted in .gitignore) so the
 # mechanism is there the day a skill or agent gets committed. symlink-each
 # leaves anything the machine keeps in those dirs alone.
-"~/.claude/skills" = { mode = "symlink-each" }
-"~/.claude/agents" = { mode = "symlink-each" }
+#
+# The .gitkeep in each is load-bearing twice over: git cannot track an empty
+# directory, and a sourceless entry whose source directory does not exist
+# aborts the whole apply ("files: sources do not exist", measured). It is
+# tracked, so the manifest lists it and it is linked out — a harmless
+# ~/.claude/skills/.gitkeep, the same as before the manifest.
+"~/.claude/skills" = { mode = "symlink-each", manifest = "git" }
+"~/.claude/agents" = { mode = "symlink-each", manifest = "git" }
 
 # Git. The shareable half only: ~/.gitconfig ends with [include]s for
 # ~/.gitconfig.identity (name/email) and ~/.gitconfig.local (signing key),
@@ -306,8 +330,9 @@ run = [
 "~/.git-completion.bash" = { mode = "symlink" }
 "~/.git-prompt.sh" = { mode = "symlink" }
 # init.templatedir points here: hooks copied into every new/cloned repo.
-# symlink-each so a machine can drop its own hook in alongside ours.
-"~/.git-template/hooks" = { mode = "symlink-each" }
+# symlink-each so a machine can drop its own hook in alongside ours;
+# manifest = "git" for the reason spelled out on ~/.claude/commands above.
+"~/.git-template/hooks" = { mode = "symlink-each", manifest = "git" }
 
 "~/.config/ruff/ruff.toml" = { mode = "symlink" }
 "~/.config/hunk/config.toml" = { mode = "symlink" }

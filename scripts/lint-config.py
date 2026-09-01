@@ -10,6 +10,9 @@ Checked namespaces (each key must appear in at most one file):
   - [dotfiles] target paths
   - [bootstrap.repos] target paths
   - [bootstrap.packages] entries
+  - [bootstrap.files] / [bootstrap.directories] target paths
+  - [bootstrap.groups] / [bootstrap.users] names
+  - [bootstrap.services] unit names
   - [tools] entries
   - [vars] keys
   - [tasks.*] names
@@ -64,6 +67,21 @@ NAMESPACES = [
     # losing it means gpg refuses its homedir and ssh refuses its config
     # — with no error from mise at any point.
     "bootstrap.hooks",
+    # The declarative resource sections mise gained in 2026.8.x. They are
+    # convergent singletons exactly like the older namespaces: two files
+    # declaring the same /etc path, group, user or unit resolve by the same
+    # undefined precedence, and the loser is silent. Listed before anything
+    # here uses them so the first entry is covered.
+    "bootstrap.files",
+    "bootstrap.directories",
+    "bootstrap.groups",
+    "bootstrap.users",
+    "bootstrap.services",
+    "bootstrap.compose",
+    # Not a table of targets but of policy keys (backend, state,
+    # default_incoming, rules) — each is still a singleton, so the same rule
+    # applies.
+    "bootstrap.linux.firewall",
     "tools",
     "vars",
     "env",
@@ -187,16 +205,26 @@ def check_relative_sources(rel: str, data: dict, problems: list[str]) -> None:
     OK and deployed as `~/.myrc -> ~/.config/mise/miserc.example.toml  source
     missing` — and a missing explicit source aborts the ENTIRE apply,
     every other dotfile with it.
+
+    [bootstrap.files] resolves its `source` the same way, and fails harder:
+    verified on 2026.8.16 with a config reached through a symlink, mise read
+    `<link dir>/src.txt` rather than the real file's neighbour and `mise
+    bootstrap files status` died with "failed to read source" — printing
+    nothing at all. That step is bootstrap step 3, so it takes dotfiles, tools
+    and the whole imperative tail down with it. Inline `content` avoids the
+    question entirely and is what this repo uses.
     """
-    for key, value in extract("dotfiles", data).items():
-        source = entry_source(value)
-        if not isinstance(source, str) or is_absolute_source(source):
-            continue
-        problems.append(
-            f"RELATIVE SOURCE: [dotfiles] {key!r} in {rel} -> {source!r} resolves against "
-            f"the declaring config file's directory (~/.config/mise), not the repo. "
-            f"Use an absolute source (~/.dotfiles-mise/... or ~/<companion>/...)."
-        )
+    for ns in ("dotfiles", "bootstrap.files"):
+        for key, value in extract(ns, data).items():
+            source = entry_source(value)
+            if not isinstance(source, str) or is_absolute_source(source):
+                continue
+            problems.append(
+                f"RELATIVE SOURCE: [{ns}] {key!r} in {rel} -> {source!r} resolves against "
+                f"the declaring config file's directory (~/.config/mise), not the repo. "
+                f"Use an absolute source (~/.dotfiles-mise/... or ~/<companion>/...), "
+                f"or inline `content`."
+            )
 
 
 def check_modes(rel: str, data: dict, problems: list[str]) -> None:

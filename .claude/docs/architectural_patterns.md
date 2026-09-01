@@ -54,7 +54,9 @@ Five touchpoints, and the lint only catches one of them:
 ## 2. One key, one file
 
 No `[dotfiles]` target, `[bootstrap.repos]` path, tool, var or task may be declared in two
-loadable config files.
+loadable config files — and, since mise 2026.8.x, no managed file, directory, group, user,
+service, Compose project or firewall key either. They are convergent singletons with the same
+undefined precedence, so the lint covers them from before the first entry exists.
 
 This is not tidiness. mise's same-key precedence across sibling global configs is genuinely
 inconsistent — two tests disagreed with each other and with the documented hierarchy. Rather
@@ -67,8 +69,8 @@ than depend on an order that isn't stable, the repo makes collisions impossible 
   `~/.config/mise/conf.d/`, so a companion repo colliding with the main one is caught rather
   than silently resolved
 
-The other checks it carries: self-management invariants, no relative `[dotfiles]` sources, mode
-sanity, and the profile registry described above.
+The other checks it carries: self-management invariants, no relative `[dotfiles]` **or**
+`[bootstrap.files]` sources, mode sanity, and the profile registry described above.
 
 ---
 
@@ -138,7 +140,7 @@ The default is to declare. A task exists only when mise cannot express the thing
 | apt packages from configured repos | anything needing a **third-party** apt repo |
 | public git clones | a clone that might fail (private repo, no credentials) |
 | files with a stable source | links into something an earlier step creates |
-| tool versions | group membership, udev rules, `dconf`, `chsh` |
+| tool versions, udev rules, groups | group **membership**, `udevadm` reload, `dconf`, `chsh` |
 
 The two failure modes that force this:
 
@@ -150,6 +152,24 @@ The two failure modes that force this:
 `[bootstrap.user]` is declared **nowhere** for the same reason: it runs one PAM-prompting `chsh`
 that fails on every unattended run, and it runs *before* the task step, so its failure would take
 the whole tail with it — including the task written to handle exactly that case.
+
+### The privileged sections, and the trade this repo accepted
+
+2026.8.x moved two things out of `setup:cosmic` and into `config.cosmic.toml`: the ddcutil udev
+rule (`[bootstrap.files]`) and the `i2c` group (`[bootstrap.groups]`). Both now show up in
+`mise bootstrap status` and `mise bootstrap plan`, which a task could never do — it can only
+repair drift silently.
+
+The price is the failure shape. A task gates on `sudo_ok` and `skip`s, so a machine that cannot
+elevate loses that one step. These sections instead **fail closed and abort the run**, at steps 0
+and 3, before dotfiles and tools; `system_packages.sudo = false` does not soften it. Measured, not
+assumed — see `mise_behaviours.md` 32.
+
+That is acceptable here for one reason: with a terminal, mise logs the command and prompts once,
+which is the normal path on the personal machines `cosmic` targets. It follows that **nothing in
+core `config.toml` may declare a privileged resource** — the exposure stays inside a profile, and
+the recovery is `mise bootstrap --skip accounts,files`. The membership (`usermod -aG`) stays in the
+task regardless: `[bootstrap.users]` needs a literal user name, which a public repo does not have.
 
 ---
 
@@ -185,9 +205,13 @@ the process umask and both gpg and ssh refuse a too-permissive directory.
 
 ## 7. Removal is manual, and that is a design position
 
-mise keeps no state database. Removing a `[dotfiles]` entry leaves its symlink; nothing reports
-it. `mise run cleanup` is the reaper, and it is deliberately narrow: it removes only links that
-are **both** dangling **and** pointing into this repo.
+mise records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and offers `mise bootstrap
+dotfiles unapply`, but it reads the **live config** to decide what an entry owns — so it helps
+only while the entry still exists. The order that works is unapply, *then* delete the entry.
+
+Removing the entry first leaves its symlink and nothing reports it. `mise run cleanup` is the
+reaper for that case, and it is deliberately narrow: it removes only links that are **both**
+dangling **and** pointing into this repo.
 
 What it will not do is undo a *working* deployment. Deselecting a profile leaves its files in
 place, because their sources still exist. That is a manual delete, and `README.md` says so.

@@ -41,7 +41,12 @@ Each of these is a way to break **every** machine, not just the companion:
 1. **Every entry declares an explicit, absolute `source`.** A relative source in
    a `conf.d` drop-in resolves against `~/.config/mise/conf.d/`, not against the
    companion; a *sourceless* entry mirrors this repo's `dotfiles.root` and would
-   silently look for the file in `~/.dotfiles-mise/home/`.
+   silently look for the file in `~/.dotfiles-mise/home/`. This applies to
+   `[bootstrap.files]` too, should the companion ever declare one — same
+   resolution, worse failure: `mise bootstrap files status` dies outright rather
+   than reporting one bad entry, at bootstrap step 3, taking dotfiles and tools
+   with it. Inline `content` sidesteps it entirely. `lint-config.py --live`
+   checks both namespaces.
 2. **Never declare `settings.dotfiles.root`, and never declare a key this repo
    declares.** Precedence between sibling configs is undefined — the loser is
    silent and arbitrary. `scripts/lint-config.py --live` enforces this; both
@@ -53,7 +58,8 @@ Each of these is a way to break **every** machine, not just the companion:
    deleted outright, mise just omits the dangling drop-in and everything else
    applies. The dangerous state is *drop-in present, source missing*.
 4. **The clone must live at `~/.dotfiles-custom-mise`.** `source` is **not**
-   templated (`{{ env.X }}` is used as a literal path segment — verified), so
+   templated (`{{ env.X }}` is used as a literal path segment — verified again
+   on mise 2026.8.16, including with the new `config_source` variable), so
    the absolute paths inside `config.custom.toml` cannot follow the clone
    elsewhere. `$DOTFILES_CUSTOM_MISE_DIR` moves where the *task* looks; it does
    not rewrite the sources, so a non-default location needs those paths edited
@@ -61,6 +67,15 @@ Each of these is a way to break **every** machine, not just the companion:
 
 No `[tools]`, `[bootstrap.*]` or `[tasks]` in the companion: those belong here,
 where they are linted and reviewed.
+
+One exception is worth knowing about but is **not** taken today: `[bootstrap.users]`
+needs a literal user name (mise rejects `[bootstrap.users."{{ env.USER }}"]`), so
+the companion is the only place that *could* declare this machine's group
+membership or login shell. It stays in `setup:cosmic` and
+`setup:login-shell-fallback` because the accounts step is bootstrap step **0** and
+fails closed: on a machine where the membership is genuinely missing — the only
+machine where the declaration would do anything — an unattended run would abort
+before packages, dotfiles and tools. See `.claude/docs/mise_behaviours.md` 32.
 
 ## Adding a file
 

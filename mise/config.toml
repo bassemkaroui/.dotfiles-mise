@@ -99,6 +99,26 @@ jq = "latest"
 # PathPicker (fpp); the ~/.local/bin/fpp symlink is created by setup:repo-links
 "~/.local/opt/PathPicker" = { url = "https://github.com/facebook/PathPicker.git" }
 
+# ── System directories ────────────────────────────────────────────────────────
+# Declared so `mise bootstrap status` / `mise bootstrap plan` REPORT a drifted
+# mode, which a hook can never do — it can only repair one silently.
+#
+# These do NOT replace the pre-dotfiles hook below, they double it. Measured on
+# 2026.8.16 from a deliberately-wrong 0755: the files step (bootstrap step 3)
+# converges these to 0700 under a full `mise bootstrap`, under
+# `--only files,dotfiles`, and under `mise bootstrap files apply` — but it is
+# SKIPPED by `mise bootstrap --only dotfiles` (install.sh's link-only first
+# pass, and sandbox/mkhome.sh's) and by a standalone `mise dotfiles apply`,
+# both of which ended at 0755 while still running the hook. The hook covers
+# those two paths; these entries cover reporting.
+#
+# 0700 is therefore stated twice, here and in the hook. Change both together.
+[bootstrap.directories."~/.gnupg"]
+mode = "0700"
+
+[bootstrap.directories."~/.ssh"]
+mode = "0700"
+
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 # $MISE_ENV is NOT visible to hooks (verified), so everything here must be
 # unconditional and safe on every machine — anything profile-dependent belongs
@@ -111,6 +131,11 @@ jq = "latest"
 # ~/.ssh gets the same treatment ahead of the companion repo's ~/.ssh/config
 # entry: ssh refuses a group/world-writable directory, and mise would create it
 # at the process umask (0775 observed at umask 002).
+#
+# [bootstrap.directories] above declares the same two directories, for the sake
+# of `bootstrap status`/`plan`. This hook stays because the step that applies
+# those declarations does not run in every path that applies dotfiles — see the
+# measurements there.
 pre-dotfiles = "mkdir -p ~/.gnupg ~/.ssh && chmod 700 ~/.gnupg ~/.ssh"
 
 [bootstrap.hooks.post-tools]

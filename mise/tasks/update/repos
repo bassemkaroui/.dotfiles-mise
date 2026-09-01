@@ -29,10 +29,19 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 #                      class and would otherwise sit at their clone-day commit
 #                      forever. THIS is the set the task exists to move.
 #
-# The docs advertise `mise bootstrap repos update` and `... repos exec` for
-# exactly this. NEITHER EXISTS in mise 2026.7.7 — `mise bootstrap repos --help`
-# lists only `apply` and `status` (verified 2026-07-21), so the git work is
-# done here. If a later mise ships them, this task becomes a thin wrapper.
+# The docs advertised `mise bootstrap repos update` and `... repos exec` for
+# exactly this, and NEITHER EXISTED in mise 2026.7.7 — `mise bootstrap repos
+# --help` listed only `apply` and `status` (verified 2026-07-21) — so this task
+# hand-rolled the git work and predicted it would become a thin wrapper once
+# mise shipped them. It has: both exist in 2026.8.16, `update` fast-forwards
+# exactly the unpinned class, and `--skip-dirty` skips a dirty checkout instead
+# of failing the run. The plumbing below is therefore gone.
+#
+# What is NOT gone is the reporting. `mise bootstrap repos update` does the
+# work but says nothing about WHY a repo it skipped is a problem, and three of
+# the states it can leave behind (dirty, conflict, diverged-from-ref) each make
+# `mise bootstrap` itself exit 1 at the repos step, before dotfiles, tools and
+# the whole imperative tail. Diagnosing those is what this task still owns.
 #
 # Rules:
 #   - a dirty repo is never touched — and dirt is worse than untidy here: ANY
@@ -95,8 +104,10 @@ fi
     exit 0
 }
 
-updated=0
 failed=0
+# The unpinned class, collected here and handed to mise in ONE call below.
+unpinned=()
+unpinned_names=()
 
 for row in "${rows[@]}"; do
     IFS="$US" read -r path ref state <<<"$row"
@@ -158,64 +169,46 @@ for row in "${rows[@]}"; do
         continue
     fi
 
-    branch="$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
-    if [[ -z "$branch" ]]; then
-        warn "$name — detached HEAD, leaving it alone"
-        continue
-    fi
-    if ! git -C "$path" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null \
-        && ! git -C "$path" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-        warn "$name — branch '$branch' has no counterpart on origin, leaving it alone"
-        continue
-    fi
-
-    before="$(git -C "$path" rev-parse HEAD)"
-    if ! git -C "$path" fetch --quiet origin "$branch" 2>/dev/null; then
-        warn "$name — fetch failed (offline?), leaving it alone"
-        ((failed++)) || true
-        continue
-    fi
-    # Guarded: the branch check above deliberately falls through when
-    # refs/remotes/origin/$branch does not exist locally but ls-remote finds it
-    # on the server, and `git fetch origin <branch>` only creates the
-    # remote-tracking ref when remote.origin.fetch is a wildcard refspec. In a
-    # --single-branch clone checked out on another branch it is not, so this
-    # rev-parse failed with "ambiguous argument", exited 128 under set -e, and
-    # took the rest of the loop and the summary with it.
-    if ! after="$(git -C "$path" rev-parse --verify --quiet "origin/$branch" 2>/dev/null)"; then
-        warn "$name — fetched, but origin/$branch is not tracked locally (single-branch clone?)"
-        warn "    fix with: git -C $path remote set-branches --add origin $branch && git -C $path fetch origin"
-        ((failed++)) || true
-        continue
-    fi
-
-    if [[ "$before" == "$after" ]]; then
-        ok "$name — already current on $branch (${before:0:7})"
-        continue
-    fi
-    if [[ "$CHECK" == "true" ]]; then
-        info "$name — ${before:0:7} → ${after:0:7} available on $branch (--check: not pulled)"
-        ((updated++)) || true
-        continue
-    fi
-    if git -C "$path" merge --ff-only --quiet "origin/$branch" 2>/dev/null; then
-        ok_changed "$name — ${before:0:7} → ${after:0:7} on $branch"
-        ((updated++)) || true
-    else
-        warn "$name — not a fast-forward from origin/$branch, leaving it alone"
-        ((failed++)) || true
-    fi
+    # No ref: the class mise never touches on its own after the first clone
+    # (see the ownership table at the top), and the reason this task exists.
+    unpinned+=("$path")
+    unpinned_names+=("$name")
 done
 
 echo
 if ((failed)); then
-    warn "$failed repo(s) could not be updated — see above"
+    warn "$failed repo(s) need attention — see above"
 fi
-if ((updated == 0)); then
-    ok "All updatable repos are current"
-elif [[ "$CHECK" == "true" ]]; then
-    info "$updated repo(s) have updates available (run without --check to pull)"
+
+if ((${#unpinned[@]} == 0)); then
+    ok "No unpinned clones to update"
+    exit $((failed > 0 ? 1 : 0))
+fi
+
+# Paths are passed EXPLICITLY, which is what keeps this task's contract intact:
+# a bare `mise bootstrap repos update` also fast-forwards a ref-tracking repo
+# whose state is `differs` (verified: it plans a `checkout master` + ff-pull for
+# ~/.tmux). Those are reported above and left to `mise bootstrap`, exactly as
+# before.
+#
+# --yes: the task IS the consent — a confirmation prompt here would hang a
+# non-interactive `mise run update:repos`. --skip-dirty: a dirty clone is
+# reported above with its remedy; it must not abort the other repos' updates.
+info "Handing ${#unpinned[@]} unpinned clone(s) to \`mise bootstrap repos update\`:"
+printf '         %s\n' "${unpinned_names[@]}"
+
+update_args=(--skip-dirty --yes)
+[[ "$CHECK" == "true" ]] && update_args+=(--dry-run)
+
+if mise bootstrap repos update "${update_args[@]}" "${unpinned[@]}"; then
+    if [[ "$CHECK" == "true" ]]; then
+        info "--check: nothing was pulled — the git commands above are what would run"
+    else
+        ok_changed "Unpinned clones are current"
+    fi
 else
-    ok_changed "Updated $updated repo(s)"
+    warn "\`mise bootstrap repos update\` reported a problem — see its output above"
+    ((failed++)) || true
 fi
+
 ((failed == 0))

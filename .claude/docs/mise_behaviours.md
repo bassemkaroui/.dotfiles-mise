@@ -5,7 +5,8 @@ what the documentation implies, and a few contradict what an earlier version of 
 claimed. **Re-verify on a mise version bump.** `sandbox/mkhome.sh` gives you a throwaway `$HOME`
 to do it in.
 
-Baseline: mise 2026.7.7 through 2026.7.13.
+Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
+(entries 8, 11, 18 and 25 changed; 32-33 are new).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -99,13 +100,22 @@ never data to mise.
 `install.sh`'s conflict backup therefore must not filter on mode (it did once; fixed). It keys
 on `mise dotfiles status --json` reporting `state: differs`.
 
-### 8. There are no removal semantics
+### 8. Removal is explicit, and only for entries you still declare
 
-Removing a `[dotfiles]` entry, or renaming a `config.<profile>.toml`, leaves the symlink in
-place pointing at a source that no longer exists. `mise config ls`, `mise dotfiles status` and
-`mise doctor` all decline to mention it while the profile silently stops applying. The `cleanup`
-task is the missing reaper; it only removes links that are both dangling and pointing into this
-repo.
+**Amended on 2026.8.16.** This entry used to say mise keeps no state database. It now does, for
+part of the problem: managed `symlink-each` links are recorded under `$MISE_STATE_DIR/dotfiles`,
+and `mise bootstrap dotfiles unapply` removes what the *current* config says an entry owns
+(`--force` for modified copies, templates and plain-line edits). Upstream's own wording changed
+with it — "because mise keeps no state database" became "because the active config still defines
+which state belongs to an entry".
+
+The gap that remains is the one this repo actually hits: **unapply reads the live config**, so it
+cannot help once the entry is gone. Removing a `[dotfiles]` entry, or renaming a
+`config.<profile>.toml`, still leaves the symlink in place pointing at a source that no longer
+exists, and `mise config ls`, `mise dotfiles status` and `mise doctor` all decline to mention it
+while the profile silently stops applying. The order that works is **unapply first, then delete
+the entry**; the `cleanup` task is the reaper for everything already orphaned, and only removes
+links that are both dangling and pointing into this repo.
 
 Note what `cleanup` does **not** do: deselecting a profile leaves its already-deployed files
 alone, because the source still exists. That is a manual delete.
@@ -130,11 +140,23 @@ mise's own conflict error recommends it. On the self-management entries it overw
 committed `mise/config*.toml` with self-referential symlink loops and silently drops the global
 config. Resolve conflicts by moving the offending file aside — which is what `install.sh` does.
 
-### 11. `[dotfiles].source` is not templated
+### 11. `source` is not templated — in `[dotfiles]` **or** `[bootstrap.files]`
 
 `source = "{{ env.X }}/file"` is used as a literal path, which then "does not exist" and aborts
 the whole apply (see 6). This is why the companion repo's absolute sources cannot follow the
 clone, and why it must live at `~/.dotfiles-custom-mise`.
+
+Re-verified on 2026.8.16, including against the 2026.8.x `config_source` template variable, which
+does resolve a symlinked config to its real directory in `[env]`: `{{ config_root }}/src.txt` and
+`{{ config_source | canonicalize | dirname }}/src.txt` were both reported verbatim, braces and
+all, in the resolved source path.
+
+`[bootstrap.files].source` behaves the same way and **fails harder**. Verified through a config
+reached by symlink: mise resolved the source against the *link's* directory, and `mise bootstrap
+files status` died with `failed to read source …`, printing nothing at all — not a per-entry
+warning. That is bootstrap step 3, so it takes dotfiles, tools and the whole tail with it. Use
+inline `content` for privileged files and the question never arises; `scripts/lint-config.py`
+rejects a relative source in either namespace.
 
 ### 12. mise creates missing parent directories with the process umask
 
@@ -220,6 +242,14 @@ to rescue exactly this case was therefore unreachable in the case it was written
 interactive chsh → `exec zsh` in `~/.bash_profile`, each rung tried only where it can work.
 Upstream offers no tolerate-failure knob.
 
+2026.8.x adds a second way to express it: `[bootstrap.users.<name>].shell`, applied with
+`usermod` inside mise's elevated helper rather than `chsh`, so it never PAM-prompts. This repo
+still does not use it, for two reasons. The name cannot be templated (see 32), so only the
+private companion repo could hold it; and the accounts step is bootstrap step **0**, which is
+both before `apt:zsh` installs the shell it would point at and early enough that a failure to
+elevate costs the entire run (see 32). NSS-managed accounts need the fallback task regardless —
+they are not in `/etc/passwd`, so no `usermod` route can reach them.
+
 ### 19. `#USAGE` flags are real environment variables
 
 `#USAGE flag "--yes"` exports `usage_yes=true`, and leaves it unset when the flag is absent, so
@@ -277,11 +307,18 @@ remedies; `update:repos` reports the same set.
 
 `update:repos` exists for that last set.
 
-### 25. `mise bootstrap repos` has only `apply` and `status`
+### 25. `mise bootstrap repos update` and `exec` exist as of 2026.8.x
 
-The vendored docs describe `repos update` and `repos exec` in detail. `mise bootstrap repos
---help` lists neither, and invoking them errors with `unrecognized subcommand`. `update:repos`
-does the git work itself.
+**Reversed on 2026.8.16.** Through 2026.7.x the vendored docs described `repos update` and `repos
+exec` in detail while `mise bootstrap repos --help` listed neither, and invoking them errored with
+`unrecognized subcommand`. Both are now real, and `update` takes `--skip-dirty` (skip a dirty
+checkout instead of failing the run) and `--dry-run` (print the git commands).
+
+`update` fetches and fast-forwards exactly the unpinned class from 24 — the set mise otherwise
+never touches after the first clone — and warns-and-skips a detached HEAD. `update:repos` was
+rewritten around it and now only diagnoses: a bare invocation would also `checkout` + ff-pull a
+ref-tracking repo whose state is `differs` (verified against `~/.tmux`), so the task passes the
+unpinned paths explicitly to keep its contract.
 
 ---
 
@@ -356,3 +393,45 @@ glibc-floored. Measured floors: `0.26.11 = 2.39`, `0.25.10 = 2.34`, `0.24.7 = 2.
 
 This is why the repo declares Ubuntu 24.04+ / glibc ≥ 2.39. A 22.04 user's escape hatch is
 pinning `tree-sitter = "0.25.10"`.
+
+---
+
+## New in mise 2026.8.x
+
+### 32. The privileged declarative sections fail closed, at the earliest steps
+
+`[bootstrap.users]`, `[bootstrap.groups]`, `[bootstrap.files]` and `[bootstrap.directories]` are
+convergent and well-behaved — but when a change is pending and mise cannot elevate, the step
+**errors and aborts the run**. There is no skip-what-needs-root mode: `system_packages.sudo =
+false` is documented as "mise will print the command for you to run yourself instead", and it
+does print it, then still exits 1 (verified).
+
+Measured in a throwaway `$HOME`, no TTY, sudo requiring a password:
+
+| declaration | fails at | cost |
+| --- | --- | --- |
+| `[bootstrap.files]` needing a write | step 3 | dotfiles, tools, tail — none of them ran |
+| `[bootstrap.groups.<new>]` | step 0 | everything, earlier still |
+
+With a TTY it is unremarkable: mise logs the exact command, `sudo` prompts once for the whole
+batched plan, and it applies. That is the normal path on a personal machine, which is why
+`config.cosmic.toml` does declare its udev rule and `i2c` group. The recovery on a machine that
+cannot elevate is `mise bootstrap --skip accounts,files`.
+
+Two consequences worth internalising: a privileged declaration converts a *partial* failure into a
+*total* one (the imperative equivalent, `sudo_ok` + `skip`, costs only its own step), and nothing
+in core `config.toml` should ever need root — keep that exposure inside a profile.
+
+Also verified: `[bootstrap.users.<name>]` names are **not templated** — `[bootstrap.users."{{
+env.USER }}"]` is rejected outright with `invalid bootstrap user name`. Anything user-specific
+therefore belongs in the private companion repo, not here. Supplementary `groups` are additive by
+default (`exclusive_groups = false`), so declaring one does not strip `sudo` or `adm`.
+
+### 33. `raw = true` now takes an exclusive per-command lock
+
+Upstream's warning that raw tasks "really screw up the output whenever mise runs tasks in
+parallel", with its instruction to keep other tasks out of the way, is gone. A raw command now
+holds an exclusive lock for as long as it runs, so mise will not run another command alongside it.
+The lock is per *command*, not per task, so two raw tasks can still interleave between their
+individual commands. Every file task in this repo is `raw=true`; the `[tasks.bootstrap]` chain is
+sequential anyway, so nothing here depended on the old advice.

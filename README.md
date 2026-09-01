@@ -1,7 +1,7 @@
 # .dotfiles-mise
 
 Declarative dotfiles + machine setup built on [mise bootstrap](https://mise.jdx.dev/bootstrap.html)
-(mise ≥ 2026.7.7). Successor to the Stow-based [.dotfiles](https://github.com/bassemkaroui/.dotfiles)
+(mise ≥ 2026.8.16). Successor to the Stow-based [.dotfiles](https://github.com/bassemkaroui/.dotfiles)
 repo — see [MIGRATION.md](MIGRATION.md) for the capability map and cutover checklist.
 
 Targets **Ubuntu 24.04+ / glibc ≥ 2.39**, Debian-family (Ubuntu/Pop!_OS/Mint). Packages
@@ -65,7 +65,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | *(core, always on)* | runtimes (rust/go/node/zig), core CLI tools, shell configs (zsh + oh-my-zsh + p10k, bash), tmux, git tooling, gpg config, login shell |
 | `graphical` | Ghostty & Obsidian installs + configs, Nerd Font + terminal fonts |
 | `gnome` | GNOME Shell extensions + `dconf` (implies `graphical`). The two vendored GTK themes were dropped when this repo went public — install them from upstream |
-| `cosmic` | ddcutil/i2c setup; theme picker via `mise run setup:cosmic-theme` (implies `graphical`) |
+| `cosmic` | ddcutil/i2c udev rule, group and membership; theme picker via `mise run setup:cosmic-theme` (implies `graphical`) |
 | `ai` | claude + sandbox-runtime |
 | `dev` | uv, corepack, pre-commit, doppler |
 | `yazi` | yazi + rich preview stack |
@@ -87,6 +87,7 @@ run `mise run cleanup` to reap stale symlinks.
 
 ```bash
 mise bootstrap status            # everything: packages, repos, dotfiles, shell, tools
+mise bootstrap plan              # the declarative resources, in dependency order
 mise dotfiles status             # just the dotfiles
 mise dotfiles apply --dry-run    # preview
 mise dotfiles add ~/.p10k.zsh    # recapture a file you edited/regenerated in place
@@ -177,8 +178,9 @@ with template mode.
 ## Design rules (enforced, not aspirational)
 
 - **One key, one file.** mise's sibling-config precedence is inconsistent (verified on
-  2026.7.7), so no `[dotfiles]` target / repo path / tool / var / task may be declared in two
-  config files. `scripts/lint-config.py` fails the build otherwise.
+  2026.7.7), so no `[dotfiles]` target / repo path / tool / var / task — nor any managed file,
+  directory, group, user or service — may be declared in two config files.
+  `scripts/lint-config.py` fails the build otherwise.
 - **Hooks are unconditional.** `$MISE_ENV` does not reach `[bootstrap.hooks]` (verified) —
   profile-gated logic lives in tasks, which do see it.
 - **Never run `git config --global …` on these machines.** `~/.gitconfig` is a symlink

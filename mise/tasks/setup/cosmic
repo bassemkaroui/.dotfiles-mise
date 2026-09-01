@@ -8,13 +8,24 @@ TASK_NAME="setup:cosmic"
 # shellcheck source=../lib/profile.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/profile.sh"
 
-# Port of the old repo's setup:cosmic, minus two things:
+# Port of the old repo's setup:cosmic, minus three things:
 #
-#   - the is_cosmic() DE detection (the `cosmic` profile is that decision), and
-#   - the ddcutil install, which is now "apt:ddcutil" in config.cosmic.toml.
+#   - the is_cosmic() DE detection (the `cosmic` profile is that decision),
+#   - the ddcutil install, which is "apt:ddcutil" in config.cosmic.toml, and
+#   - the udev rule and the i2c group, which are [bootstrap.files] and
+#     [bootstrap.groups] entries in config.cosmic.toml as of 2026.9 (mise
+#     2026.8.x gained both sections; see the trade-off written up there).
 #
-# What is left is the part mise cannot declare: a udev rule, a group, and the
-# membership that lets ddcutil talk to /dev/i2c-* without root.
+# What is left is the part mise still cannot declare:
+#
+#   - GROUP MEMBERSHIP. [bootstrap.users] could express it, but only under a
+#     LITERAL user name — verified on 2026.8.16, `[bootstrap.users."{{ env.USER
+#     }}"]` is rejected with "invalid bootstrap user name". A public repo shared
+#     across machines has no name to write, so this stays a task. (A private
+#     companion repo does have one — that is where it would go.)
+#   - RELOADING udev. A [bootstrap.files] entry can `notify` a
+#     [bootstrap.services] unit, but not run udevadm, and there is no service
+#     here to notify.
 #
 # The theme is NOT applied from here. The old task ended by invoking the
 # interactive picker; a chained task can prompt when bootstrap is run from a
@@ -29,55 +40,74 @@ if ! have ddcutil; then
 fi
 ok "ddcutil available: $(ddcutil --version 2>/dev/null | head -1)"
 
-if ! sudo_ok; then
-    warn "The i2c udev rule and group need root, and sudo cannot ask for a password here"
-    skip "Run 'mise run setup:cosmic' in a terminal, where sudo can prompt"
-fi
-
-# ─── udev rule ────────────────────────────────────────────────────────────────
-
 UDEV_RULE="/etc/udev/rules.d/45-ddcutil-i2c.rules"
-udev_changed=false
 
-if [[ -f "$UDEV_RULE" ]]; then
-    ok "udev rule already present: $UDEV_RULE"
-else
-    SHIPPED="/usr/share/ddcutil/data/45-ddcutil-i2c.rules"
-    if [[ -f "$SHIPPED" ]]; then
-        sudo -n cp "$SHIPPED" "$UDEV_RULE" || skip "Could not install the udev rule"
-        ok_changed "udev rule installed from $SHIPPED"
-    else
-        printf 'KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"\n' \
-            | sudo -n tee "$UDEV_RULE" >/dev/null || skip "Could not create $UDEV_RULE"
-        ok_changed "udev rule created at $UDEV_RULE"
-    fi
-    udev_changed=true
-fi
-
-# ─── i2c group + membership ───────────────────────────────────────────────────
+# ─── i2c group membership ─────────────────────────────────────────────────────
 
 USER="${USER:-$(id -un)}"
 
-if getent group i2c &>/dev/null; then
-    ok "i2c group exists"
-else
-    sudo -n groupadd i2c || skip "Could not create the i2c group"
-    ok_changed "Created the i2c group"
+if ! getent group i2c &>/dev/null; then
+    # [bootstrap.groups.i2c] creates it at bootstrap step 0, long before this
+    # task runs at step 15 — so a missing group means the accounts step was
+    # skipped or could not elevate, not that anything here should create it.
+    skip "No i2c group yet — run 'mise bootstrap' from a terminal (it needs sudo once)"
 fi
+ok "i2c group exists"
 
 if id -nG "$USER" | grep -qw i2c; then
     ok "$USER is already in the i2c group"
-else
-    sudo -n usermod -aG i2c "$USER" || skip "Could not add $USER to the i2c group"
+elif ! sudo_ok; then
+    warn "Adding $USER to the i2c group needs root, and sudo cannot ask for a password here"
+    skip "Run 'mise run setup:cosmic' in a terminal, where sudo can prompt"
+elif sudo -n usermod -aG i2c "$USER"; then
     ok_changed "Added $USER to the i2c group (log out and back in for it to take effect)"
+else
+    skip "Could not add $USER to the i2c group"
 fi
 
-if [[ "$udev_changed" == true ]]; then
-    # udevadm has no daemon to talk to in a container; the rule is still on
-    # disk and will apply at next boot, so this is a warning, not a failure.
-    if sudo -n udevadm control --reload-rules && sudo -n udevadm trigger; then
-        ok_changed "Reloaded udev rules"
-    else
-        warn "Could not reload udev rules — they take effect after the next reboot"
-    fi
+# ─── udev reload ──────────────────────────────────────────────────────────────
+#
+# Convergence is checked against the DEVICES, not against the rule file: mise
+# owns the file (and reports it in `bootstrap status`), but writing a rule does
+# not apply it — the running kernel keeps the old ownership until udev reloads.
+# /dev/i2c-* in group i2c is the only evidence that the rule took effect.
+
+if [[ ! -f "$UDEV_RULE" ]]; then
+    # The [bootstrap.files] entry owns this path; a missing file means the files
+    # step was skipped or could not elevate.
+    skip "$UDEV_RULE is missing — run 'mise bootstrap' from a terminal (it needs sudo once)"
+fi
+
+shopt -s nullglob
+i2c_devs=(/dev/i2c-*)
+shopt -u nullglob
+
+if ((${#i2c_devs[@]} == 0)); then
+    # No i2c bus at all: a VM, a container, or a machine whose GPU driver
+    # exposes none. The rule is on disk and will apply the day one appears.
+    ok "No /dev/i2c-* devices on this machine — nothing to reload"
+    exit 0
+fi
+
+stale=()
+for dev in "${i2c_devs[@]}"; do
+    [[ "$(stat -c %G "$dev" 2>/dev/null)" == "i2c" ]] || stale+=("$dev")
+done
+
+if ((${#stale[@]} == 0)); then
+    ok "/dev/i2c-* already owned by group i2c (${#i2c_devs[@]} device(s))"
+    exit 0
+fi
+
+if ! sudo_ok; then
+    warn "${#stale[@]} of ${#i2c_devs[@]} i2c device(s) are not in group i2c yet, and reloading needs root"
+    skip "Run 'mise run setup:cosmic' in a terminal, or reboot — the rule applies at next boot"
+fi
+
+# udevadm has no daemon to talk to in a container; the rule is still on disk and
+# will apply at next boot, so this is a warning, not a failure.
+if sudo -n udevadm control --reload-rules && sudo -n udevadm trigger; then
+    ok_changed "Reloaded udev rules (${#stale[@]} device(s) were not in group i2c)"
+else
+    warn "Could not reload udev rules — they take effect after the next reboot"
 fi

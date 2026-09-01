@@ -10,3 +10,45 @@
 # adds the i2c udev rule and group membership that make it usable non-root —
 # that part cannot be declared, so it stays in the task.
 "apt:ddcutil" = "latest"
+
+# ── i2c access for ddcutil (the declarative half) ─────────────────────────────
+# The group and the udev rule are DECLARED, not scripted: mise converges them at
+# bootstrap step 0 (accounts) and step 3 (files), and `mise bootstrap status` /
+# `mise bootstrap plan` report drift that a script could only repair silently.
+#
+# THESE TWO STEPS NEED ROOT AND THEY FAIL CLOSED. Measured on 2026.8.16: with a
+# change pending and no way to elevate — no TTY *and* no passwordless sudo — the
+# run exits 1 at that step and every later step is skipped, dotfiles and tools
+# included. `system_packages.sudo = false` does not soften it (verified: same
+# exit 1, same abort). With a TTY mise logs the command and prompts once:
+#
+#     mise $ sudo .../mise --no-config --no-env --no-hooks bootstrap __apply-system-plan
+#     [sudo] password for <user>:
+#
+# which is the normal path on the personal machines this profile targets. On a
+# machine that cannot elevate, converge everything else with:
+#
+#     mise bootstrap --skip accounts,files
+#
+# The exposure is scoped to this profile — nothing in core config.toml needs
+# root — which is why these live here and not there.
+[bootstrap.groups.i2c]
+system = true
+
+# The content is OURS, deliberately not a copy of ddcutil's shipped
+# /usr/share/ddcutil/data/45-ddcutil-i2c.rules: declaring a file means owning
+# it, and a declaration that mirrored another package's file would fight that
+# package on every ddcutil upgrade. The single active line is identical to
+# ddcutil's. On a machine that already has the shipped copy (328 bytes of rule
+# plus commented-out alternatives), the first bootstrap after this landed
+# rewrites it — one sudo prompt, intended convergence, not an accident.
+[bootstrap.files."/etc/udev/rules.d/45-ddcutil-i2c.rules"]
+content = """
+# Managed by ~/.dotfiles-mise (mise/config.cosmic.toml) — edits are reverted.
+# Assigns the /dev/i2c-* devices to group i2c and gives that group RW access,
+# which is what lets ddcutil speak DDC/CI to a monitor without root.
+KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
+"""
+owner = "root"
+group = "root"
+mode = "0644"

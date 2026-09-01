@@ -72,6 +72,27 @@ jobs:
         run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap status
       - name: dotfiles apply --dry-run
         run: sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- dotfiles apply --dry-run
+      - name: No unresolvable resource in the plan
+        # `mise bootstrap plan` (2026.8.x) resolves every declarative resource —
+        # accounts, packages, privileged files/directories, services, firewall,
+        # compose — in dependency order, WITHOUT applying anything.
+        #
+        # --detailed-exitcode: 0 = nothing to change, 2 = changes pending,
+        # 1 = planning failed OR any resource is `unknown`. Only 1 is a failure
+        # here: a fresh runner legitimately has changes pending (2), and this
+        # machine's own sandbox reports 0. What 1 catches is the class nothing
+        # else in this job does — a package apt cannot resolve, a manager that
+        # is unavailable, a resource mise cannot interpret. `bootstrap status`
+        # exits 0 through all of those.
+        run: |
+          set -uo pipefail
+          out="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap plan --detailed-exitcode 2>&1)"
+          rc=$?
+          echo "$out"
+          case "$rc" in
+              0|2) echo "plan rc=$rc (0=converged, 2=changes pending) — OK" ;;
+              *)   echo "::error::mise bootstrap plan rc=$rc — planning failed or a resource is unknown"; exit 1 ;;
+          esac
       - name: Profile-specific entries appear only with their profile
         # --two-pass is REQUIRED here: MISE_GLOBAL_CONFIG_FILE suppresses
         # config.<profile>.toml, so a single-pass sandbox shows core

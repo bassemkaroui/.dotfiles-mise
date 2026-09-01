@@ -67,7 +67,7 @@ so the list is unconditional.
 | 12 | `install:obsidian` | AppImage (`graphical`) |
 | 13 | `install:veracrypt` | console `.deb` (`veracrypt`) |
 | 14 | `install:gnome-extensions` | extensions + `dconf` restore (`gnome`) |
-| 15 | `setup:cosmic` | ddcutil/i2c udev rule and group (`cosmic`) |
+| 15 | `setup:cosmic` | i2c group **membership** + `udevadm` reload (`cosmic`). The rule and the group themselves are `[bootstrap.files]` / `[bootstrap.groups]` entries in `config.cosmic.toml` since 2026-09; the task converges against `/dev/i2c-*` ownership, not the rule file |
 | 16 | `install:tailscale` | Tailscale (`tailscale`) — **never runs `tailscale up`** |
 | 17 | `install:docker` | Engine, CLI, containerd, buildx/compose (`docker`) + the `docker` group |
 | 18 | `install:1password` | desktop app (`1password`); the `op` CLI is a `[tools]` entry |
@@ -101,7 +101,7 @@ active, so running it inside a converge would change the chain's own inputs midw
 | `setup:cosmic-theme` | | menu |
 | `setup:cosmic-theme-clean` | | deletes cached themes |
 | `setup:repo-remotes` | `--fetch` | also chained. A newly added remote is always fetched; `--fetch` re-fetches one that already existed. A remote pointing somewhere else is left alone with the `remote set-url` command to adopt this repo's URL |
-| `update:repos` | `--check` | updates the clones mise never touches again (the ones with no `ref`) |
+| `update:repos` | `--check` | diagnoses every clone (dirty / conflict / diverged-from-`ref` — each of which fails `mise bootstrap` itself), then hands the ones with no `ref` to `mise bootstrap repos update --skip-dirty --yes` with explicit paths. `--check` adds `--dry-run` |
 | `update:tmux-local` | `--check` | also chained |
 | `update:obsidian` | `--check` | installs a newer release; never installs from scratch |
 | `update:zen` | `--check` | same; Zen also self-updates, and the version is read from the install's own `application.ini` |

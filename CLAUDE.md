@@ -3,7 +3,7 @@
 ## Overview
 
 Declarative dotfiles and machine setup built on [`mise bootstrap`](https://mise.jdx.dev/bootstrap.html)
-(mise ≥ 2026.7.7). A machine opts into capability **profiles**; everything mise can declare is
+(mise ≥ 2026.8.16). A machine opts into capability **profiles**; everything mise can declare is
 declared, and the small remainder that it cannot lives in a chain of file tasks.
 
 Successor to the Stow-based `~/.dotfiles` (retired 2026-07-26). That repo is an archive; the
@@ -63,6 +63,7 @@ names both literally, and `install.sh` refuses rather than half-deploy. After th
 | --- | --- |
 | Full setup / re-converge | `mise bootstrap --yes` |
 | What's out of sync | `mise bootstrap status` |
+| Every declarative resource, in dependency order | `mise bootstrap plan` (`--detailed-exitcode`: 0 converged, 2 pending, 1 unknown) |
 | Just the dotfiles | `mise dotfiles status` / `mise dotfiles apply --dry-run` |
 | Recapture a file edited in place | `mise dotfiles add ~/.p10k.zsh` |
 | Add/remove this machine's profiles | `mise run setup:profiles` (space toggles; `--list` to print) |
@@ -128,7 +129,7 @@ The upstream mise documentation is vendored at `docs/upstream/`, but it is **git
 committed — on a fresh clone that directory does not exist**. Populate it first:
 
 ```bash
-docs/fetch.sh                      # or: MISE_DOCS_REF=v2026.7.13 docs/fetch.sh
+docs/fetch.sh                      # or: MISE_DOCS_REF=v2026.8.16 docs/fetch.sh
 ```
 
 Pin `MISE_DOCS_REF` to the tag matching the installed mise (`mise --version`) when you need the
@@ -138,7 +139,9 @@ may already be ahead of the machine. Re-run it on a version bump.
 The pages worth reading before touching config: `bootstrap.md`, `dotfiles.md`, `configuration.md`,
 `configuration/environments.md`, `configuration/settings.md`, `templates.md`,
 `tasks/task-configuration.md`, `bootstrap/{repos,shell,user,systemd}.md` and
-`bootstrap/packages/{index,apt,plugins}.md`.
+`bootstrap/packages/{index,apt,plugins}.md`. The 2026.8.x resource sections have their own pages —
+`bootstrap/{files,accounts,services,firewall,compose,secrets,remote}.md` — of which
+`files.md` and `accounts.md` are the two this repo actually uses.
 
 **`mise <cmd> --help` on the installed binary is authoritative where the docs and the behaviour
 disagree** — and they have disagreed, more than once (documented subcommands that don't exist,

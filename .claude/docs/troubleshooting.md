@@ -24,11 +24,44 @@ This is not hypothetical: shell completions generated into `~/.oh-my-zsh/complet
 this. `install.sh` pre-flights `mise bootstrap repos status --json` and refuses with the paths and
 the remedies; `mise run update:repos` reports the same set.
 
+### `sudo requires a password but no TTY is available`
+
+Bootstrap step 0 (`accounts`) or step 3 (`files`) has a pending change that needs root, and mise
+cannot ask for a password: no controlling terminal *and* no passwordless sudo. It prints the exact
+command it wanted to run and **exits 1, skipping every later step** — dotfiles, tools and the whole
+imperative tail. `system_packages.sudo = false` does not soften this; it fails the same way with a
+different message.
+
+On this repo, only the `cosmic` profile declares anything privileged (the ddcutil udev rule and the
+`i2c` group). Three ways out, in order of preference:
+
+```bash
+mise bootstrap --yes                      # from a real terminal: sudo prompts once, done
+mise bootstrap --skip accounts,files      # converge everything else now, privileged bits later
+sudo mise --no-config --no-env --no-hooks bootstrap __apply-system-plan   # what mise printed
+```
+
+The last one is mise's own escape hatch and is what the error message hands you. Once the rule and
+the group are in place the steps report `unchanged` and never ask for sudo again.
+
 ### A clone with a `ref` fails to fast-forward
 
 `ref = "<branch>"` means **mise** fast-forwards it on every apply. If you have committed to that
 branch locally, the fast-forward fails and aborts the bootstrap. A fork you commit to is a latent
 whole-machine failure — either push it, or drop the `ref`.
+
+It also happens with **no local commits at all**, when upstream rewrites the branch: the clone
+then holds the pre-rewrite lineage and reads as ahead-and-behind. `~/.tmux` did exactly this
+(ahead 95, behind 119, oh-my-tmux having rebased `master`). `mise run update:repos --check`
+reports it as `DIVERGED` with the `git log` to inspect. Confirm the "ahead" commits are not yours
+before discarding them:
+
+```bash
+git -C ~/.tmux log --format='%an' origin/master..HEAD | sort -u    # any name that is not upstream's?
+git -C ~/.tmux status --porcelain                                  # must be empty
+git -C ~/.tmux branch pre-reset-$(date +%F)                        # a way back
+git -C ~/.tmux reset --hard origin/master
+```
 
 ### `files: sources do not exist`
 

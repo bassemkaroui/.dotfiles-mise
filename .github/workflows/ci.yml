@@ -84,8 +84,17 @@ jobs:
         # else in this job does — a package apt cannot resolve, a manager that
         # is unavailable, a resource mise cannot interpret. `bootstrap status`
         # exits 0 through all of those.
+        #
+        # `set +e` is not decoration. GitHub runs every `run:` block as
+        # `bash -e {0}`, so errexit is ON before the first line of the script
+        # and `set -uo pipefail` does not turn it off. The command substitution
+        # below EXITS on rc=2 — the expected "changes pending" — killing the
+        # step with "Process completed with exit code 2" before `case` ever
+        # runs, and printing none of the output. That is exactly how this step
+        # failed on its first real run (33526239713, all five sandbox arms).
         run: |
           set -uo pipefail
+          set +e
           out="$(sandbox/mkhome.sh --two-pass --profiles "${{ matrix.profiles }}" -- bootstrap plan --detailed-exitcode 2>&1)"
           rc=$?
           echo "$out"
@@ -164,11 +173,14 @@ jobs:
         # is the whole assertion — no --keep, no sandbox path to parse.
         # Measured on 2026.8.16: 2 files with the manifest, 3 without.
         #
-        # No `set -e`: the stray file has to be removed before the
-        # working-tree-clean step below, whatever the run did.
+        # `set +e` for the same reason as the plan step above: GitHub's
+        # `bash -e {0}` means a failing mkhome.sh would exit at the assignment,
+        # skip the `rm -f` and leave the stray file behind for the
+        # working-tree-clean step to trip over.
         if: matrix.profiles == ''
         run: |
           set -uo pipefail
+          set +e
           stray=home/.claude/commands/zz-ci-untracked.md
           printf 'untracked, must not deploy\n' > "$stray"
           out="$(sandbox/mkhome.sh -- bootstrap dotfiles diff 2>&1)"

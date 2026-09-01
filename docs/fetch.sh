@@ -17,6 +17,16 @@ FILES=(
     configuration/settings.md
     templates.md
     tasks/task-configuration.md
+    # The declarative resource sections added in 2026.8.x (mise bootstrap
+    # became a config-management tool): privileged files, Linux accounts,
+    # systemd services, firewall, compose projects, secret inputs, SSH targets.
+    bootstrap/accounts.md
+    bootstrap/files.md
+    bootstrap/services.md
+    bootstrap/firewall.md
+    bootstrap/compose.md
+    bootstrap/secrets.md
+    bootstrap/remote.md
     bootstrap/repos.md
     bootstrap/shell.md
     bootstrap/systemd.md

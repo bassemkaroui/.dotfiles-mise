@@ -78,3 +78,33 @@ require("yatline"):setup({
 		},
 	},
 })
+
+-- yatline (rev c5d4b48) still calls the `File:icon()` API that yazi 26.8 deprecated
+-- in favour of `th.icon:match(file)`. Override the one component that hits it,
+-- rather than patching the vendored plugin (which `ya pkg` upgrades would clobber).
+function Yatline.string.get:hovered_file_extension(show_icon)
+	local hovered = cx.active.current.hovered
+	if not hovered then
+		return ""
+	end
+
+	local name
+	if hovered.cha.is_dir then
+		name = "dir"
+	else
+		name = hovered.url.name:match("^.+%.(.+)$") or "null"
+	end
+
+	if not show_icon then
+		return name
+	end
+
+	local icon
+	if th.icon then
+		icon = th.icon:match(hovered)
+	else -- yazi < 25.x fallback
+		icon = hovered:icon()
+	end
+
+	return (icon and icon.text .. " " or "") .. name
+end

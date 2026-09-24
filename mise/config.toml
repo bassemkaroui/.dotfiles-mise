@@ -47,6 +47,12 @@ uv = "latest"
 resvg = "latest"
 "github:aristocratos/btop" = "latest"
 hunk = "latest"
+# tuicr — the same review-first TUI niche as hunk, kept alongside it rather than
+# instead of it: vim keybindings, and a `:submit` that pushes an inline review
+# to GitHub/GitLab/Gitea/Bitbucket, which hunk does not do. No registry short
+# name on 2026.8.16 (`mise registry | grep tuicr` is empty), so the backend is
+# spelled out — which is also what upstream's own install docs tell you to write.
+"github:agavra/tuicr" = "latest"
 # Encrypted peer-to-peer file transfer.
 croc = "latest"
 # System info banner. Archived upstream — 7.1.0 (2021) is the last release, and
@@ -336,6 +342,7 @@ run = [
 
 "~/.config/ruff/ruff.toml" = { mode = "symlink" }
 "~/.config/hunk/config.toml" = { mode = "symlink" }
+"~/.config/tuicr/config.toml" = { mode = "symlink" }
 
 # GPG. Only the agent config — keyrings stay out of the repo. mise creates
 # missing parent dirs with the process umask (0755/0775 observed), and gpg

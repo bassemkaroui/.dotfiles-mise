@@ -1,0 +1,28 @@
+# tuicr — code review TUI with vim keybindings (https://github.com/agavra/tuicr)
+# Full option list, theme resolution precedence and .tuicrignore rules live in
+# docs/CONFIG.md upstream. Unknown keys are ignored with a startup warning.
+theme = "catppuccin-mocha"
+diff_view = "unified"
+mouse = true
+wrap = true
+cursor_line = true
+search_highlight = true
+show_file_list = true
+show_pr_comments = true
+
+# Same call as ~/.config/hunk/config.toml: paint the theme's panel background
+# rather than letting the terminal's show through. Upstream defaults to true.
+transparent_background = false
+
+# Keep a few lines of context around the cursor, like vim's scrolloff.
+# Upstream defaults to 0.
+scroll_offset = 5
+
+# `editor` is deliberately unset — it falls back to $EDITOR, which home/.zshrc
+# sets to nvim only on a machine that actually has nvim (the `neovim` profile).
+# Naming nvim here would break the `e` / `:edit` handoff everywhere else.
+
+# mise owns this binary, so upgrades go through `mise up` / `mise bootstrap`,
+# never `tuicr update`. Without this, every launch pays for a release check that
+# can only ever tell us to run a command this repo does not use.
+no_update_check = true

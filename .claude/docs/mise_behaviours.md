@@ -6,7 +6,7 @@ claimed. **Re-verify on a mise version bump.** `sandbox/mkhome.sh` gives you a t
 to do it in.
 
 Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
-(entries 8, 11, 18 and 25 changed; 32-36 are new).
+(entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14.
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -276,7 +276,8 @@ never ran.
 
 This is why every vendor app (one whose packages live in a third-party repo) is a task with a
 `skip`, never a `[bootstrap.packages]` entry. mise's apt manager installs from repos that are
-already configured; it never adds a repo or a key.
+already configured; it never adds a repo or a key. Nor does it refresh their lists unless there
+are none at all — see #37.
 
 ### 22. `[bootstrap.repos]` is all-or-nothing, and `url` is not templated
 
@@ -495,3 +496,28 @@ docs) uses the new one. Flags are identical across the two spellings: `status -J
 `apply -n/-y/-f`, `add --changed/-m/-s/-p/-g/-l/--no-apply`. The subcommand list also gained
 `diff` (current vs desired, per entry — a file count for `symlink-each`), `unapply` (see #8) and
 `edit`.
+
+---
+
+## Found on 2026.9.x
+
+### 37. The packages step refreshes apt's lists only when there are none
+
+`/var/lib/apt/lists` empty (a fresh container) → mise runs `apt-get update` before installing.
+Lists present → it never does, however stale or incomplete they are. A freshly installed desktop is
+the second case: on 2026-09-26 a new machine on 2026.9.14 died at the packages step with
+`E: Unable to locate package nala` and `Package 'imagemagick' has no installation candidate`
+(also pandoc, ffmpeg, python3-venv), and a manual `sudo apt-get update` was the whole fix. Since
+packages are one batched install (#21), the one stale lookup took the entire bootstrap down with it.
+
+The threshold is the vendored `bootstrap/packages/apt.md`'s ("Metadata refresh"); the failure is
+what it looks like on a real machine. Two flags refresh, and only one is safe here:
+
+- `mise bootstrap packages apply --update` — `apt-get update`, then the install.
+- `mise bootstrap --update` — "refresh package manager metadata **and update configured repos**"
+  (2026.9.13 `--help`), i.e. the unpinned clones of #24 get pulled too. Upgrades are opt-in in this
+  repo, so this is not the fix.
+
+`install.sh` (step 7c) runs `sudo apt-get update` before its `mise bootstrap` whenever
+`packages status --json` shows an apt entry that is not `installed`, so a re-run on a converged
+machine asks for no sudo.

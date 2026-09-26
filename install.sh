@@ -730,6 +730,50 @@ for r in data.get("repos", []):
 }
 guard_repo_health
 
+# ── 7c. Fresh apt lists before the packages step ──────────────────────────────
+# mise's apt manager runs `apt-get update` only when /var/lib/apt/lists holds no
+# lists at all (fresh containers). A freshly installed desktop is not that case:
+# it has lists, just not complete or current ones, and the packages step dies with
+# `E: Unable to locate package nala` / `has no installation candidate` (seen
+# 2026-09-26 on a new machine, mise 2026.9.14: nala, pandoc, ffmpeg, imagemagick
+# and python3-venv, all of it fixed by a manual `sudo apt-get update`). Packages
+# are one batched apt-get install, so a single miss fails the step and every
+# phase after it.
+#
+# Not `mise bootstrap --update`: that also pulls every unpinned clone, and
+# upgrades are opt-in here. Gated on something actually being missing, so a
+# re-run on a converged machine does not ask for sudo just to refresh lists.
+refresh_apt_lists() {
+    command -v apt-get &>/dev/null || return 0
+    local missing
+    missing="$(
+        { mise bootstrap packages status --json 2>/dev/null || true; } \
+            | python3 -c '
+import json, sys
+raw = sys.stdin.read().strip()
+if not raw:
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit(0)
+apt = data.get("apt") if isinstance(data, dict) else None
+if not isinstance(apt, dict):
+    sys.exit(0)
+# Anything not "installed" ("missing", a pinned version mismatch) is about to go
+# through apt-get install, which is when stale lists fail.
+print(sum(1 for p in apt.get("packages", [])
+          if isinstance(p, dict) and p.get("state") != "installed"))
+' || true
+    )"
+    [[ "${missing:-0}" -gt 0 ]] || return 0
+    info "Refreshing apt package lists ($missing apt package(s) to install)..."
+    # Non-fatal: one broken third-party source must not block the distro's own
+    # packages, and the packages step reports whatever is still unresolvable.
+    sudo apt-get update || warn "apt-get update failed — continuing; the packages step will say what is unresolvable"
+}
+refresh_apt_lists
+
 info "Running mise bootstrap..."
 mise bootstrap "${YES[@]}"
 

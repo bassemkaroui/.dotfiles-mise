@@ -204,6 +204,22 @@ To recover: `git -C ~/.dotfiles-mise checkout home/.gitconfig`.
 
 ## Fresh-machine installs
 
+### `E: Unable to locate package nala` / `has no installation candidate`
+
+apt's package lists are stale or incomplete, and mise only refreshes them when there are none at
+all — a fresh container, not a freshly installed desktop (behaviour #37). All apt entries go
+through one `apt-get install`, so one miss stops the bootstrap at the packages step, before
+clones, dotfiles, tools and the task chain.
+
+`install.sh` refreshes the lists itself whenever an apt entry is still missing. On a bare
+`mise bootstrap` (after adding a profile, say):
+
+```bash
+sudo apt-get update && mise bootstrap --yes
+```
+
+Not `mise bootstrap --update`: besides the lists, it pulls every unpinned clone.
+
 ### Cloning dies with `RPC failed; curl 56 GnuTLS recv error (-24)`
 
 apt's git is linked against `libcurl-gnutls`, which truncates large packs over HTTP/2 on some

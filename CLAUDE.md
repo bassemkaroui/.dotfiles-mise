@@ -3,7 +3,8 @@
 ## Overview
 
 Declarative dotfiles and machine setup built on [`mise bootstrap`](https://mise.jdx.dev/bootstrap.html)
-(mise ≥ 2026.8.16). A machine opts into capability **profiles**; everything mise can declare is
+(mise ≥ 2026.9.15 — `install.sh` refuses an older one). A machine opts into capability
+**profiles**; everything mise can declare is
 declared, and the small remainder that it cannot lives in a chain of file tasks.
 
 Successor to the Stow-based `~/.dotfiles` (retired 2026-07-26). That repo is an archive; the
@@ -69,7 +70,9 @@ variables.
 | What would change, current vs desired, per entry | `mise bootstrap dotfiles diff` |
 | Remove an entry (in this order) | `mise bootstrap dotfiles unapply <target>` **first**, then delete the entry |
 | Recapture a file edited in place | `mise bootstrap dotfiles add ~/.p10k.zsh` |
-| Add/remove this machine's profiles | `mise run setup:profiles` (space toggles; `--list` to print) |
+| Add/remove this machine's profiles | `mise run setup:profiles` (space toggles; `--list` to print) — offers to unapply what a removed profile deployed |
+| Remove what a deselected profile deployed, by hand | `mise bootstrap unapply --dry-run <profile>` then without `--dry-run` |
+| Machine health (the `[doctor.checks]`) | `mise doctor project` (plain `mise doctor` does not run them) |
 | Cloned-repo drift | `mise bootstrap repos status` |
 | Reap links left by removed entries | `mise run cleanup --dry-run` |
 | **Everything CI runs, before you push** | **`mise run repo:lint`** |
@@ -95,16 +98,22 @@ variables.
   `[tasks.bootstrap].run` that exits non-zero kills every later member. Essential steps run
   first; optional installs run last; anything environmental uses `skip` (warn + exit 0).
 - **Optional installs are tasks, never `[bootstrap.packages]`.** A package apt cannot resolve
-  fails the whole packages step at step 2 — before dotfiles, tools and the tail.
+  fails the whole packages step at step 2 — before dotfiles, tools and the tail. Still true with
+  2026.9.x `pre-packages` repo files, re-measured on 9.15 (`mise_behaviours.md` 44).
 - **Upgrades are opt-in.** First install is unattended; replacing an installed app's binary
   needs `--update`. A routine bootstrap never swaps a running program underneath you.
-- **`mise dotfiles ...` is deprecated; write `mise bootstrap dotfiles ...`.** The old spelling
-  still works on 2026.8.16 (no runtime warning — only `--help` says so), but every call site in
-  this repo uses the new one.
+- **Write `mise bootstrap dotfiles ...`.** 2026.8.16 deprecated the top-level `mise dotfiles`;
+  2026.9.8 reversed that — `mise dotfiles`, its alias `mise dot` and `mise bootstrap dotfiles`
+  are now equal spellings. Every call site here uses the bootstrap one; keep it consistent.
 - **Removal is unapply-first.** `unapply` reads the **live** config, so deleting the entry first
   leaves it nothing to unapply: the links survive with their sources intact, which means they are
   not dangling and `mise run cleanup` cannot see them either. mise does prune a `symlink-each`
-  link by itself when the *source file* goes away — that half is handled.
+  link by itself when the *source file* goes away — that half is handled. A deselected
+  *profile* is the easy case: its file is still there, so `mise bootstrap unapply <profile>`
+  (mise ≥ 2026.9.13; `setup:profiles` offers it) removes what it deployed.
+- **Anything that backs up `differs` targets must skip `mode: "permissions"`.** `~/.ssh` and
+  `~/.gnupg` are permissions-only `[dotfiles]` entries; a drifted mode reports `differs`, and
+  moving that "conflict" aside would move the whole directory, keys included.
 - **Never `git config --global`.** `~/.gitconfig` is a symlink into this repo and
   `git config --global` follows it, writing into the working tree. Identity goes in
   `~/.gitconfig.identity` (companion repo), signing in `~/.gitconfig.local`.
@@ -139,7 +148,7 @@ The upstream mise documentation is vendored at `docs/upstream/`, but it is **git
 committed — on a fresh clone that directory does not exist**. Populate it first:
 
 ```bash
-docs/fetch.sh                      # or: MISE_DOCS_REF=v2026.8.16 docs/fetch.sh
+docs/fetch.sh                      # or: MISE_DOCS_REF=v2026.9.15 docs/fetch.sh
 ```
 
 Pin `MISE_DOCS_REF` to the tag matching the installed mise (`mise --version`) when you need the

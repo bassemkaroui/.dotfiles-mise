@@ -17,11 +17,12 @@ bootstrap logic — just files plus one small config file that says where they g
 ## How it is wired
 
 `mise/config.custom.toml` is symlinked to `~/.config/mise/conf.d/50-custom.toml`,
-where mise loads it alongside this repo's config **once it is trusted**. That
-last part is not a formality: an untrusted drop-in is *silently ignored* — no
-prompt, no error, `mise bootstrap dotfiles status` exits 0 and simply does not list its
-entries — so the companion would look wired up and deploy nothing. Both entry
-points below run `mise trust` on it. Two things create the link, deliberately:
+where mise loads it alongside this repo's config. Both entry points below also
+run `mise trust` on it. On mise 2026.7.x that was essential — an untrusted
+drop-in was *silently ignored*, no prompt, no error, so the companion looked
+wired up and deployed nothing. On 2026.9.15 a never-trusted drop-in in the
+global `conf.d` loads in full (re-verified), so the call is now belt and braces,
+kept because it is free. Two things create the link, deliberately:
 
 | Where | When | Why both |
 |---|---|---|
@@ -59,7 +60,8 @@ Each of these is a way to break **every** machine, not just the companion:
    applies. The dangerous state is *drop-in present, source missing*.
 4. **The clone must live at `~/.dotfiles-custom-mise`.** `source` is **not**
    templated (`{{ env.X }}` is used as a literal path segment — verified again
-   on mise 2026.8.16, including with the new `config_source` variable), so
+   on mise 2026.8.16 with the `config_source` variable, and on 2026.9.14 with
+   `{{ config_root }}`), so
    the absolute paths inside `config.custom.toml` cannot follow the clone
    elsewhere. `$DOTFILES_CUSTOM_MISE_DIR` moves where the *task* looks; it does
    not rewrite the sources, so a non-default location needs those paths edited
@@ -130,8 +132,23 @@ every other dotfile with it, machine-wide (verified 2026-07-22). Guard every
 >
 > `chmod 600` on the template is necessary but *not sufficient*: git records
 > only the executable bit, so a template committed 0600 arrives from a clone at
-> 0664 and the rendered file inherits that. `setup:custom-hookup` enforces 0700
-> on `~/.ssh` and 0600 on the files in it after applying.
+> 0664 and the rendered file inherits that. Declare the mode on the entry
+> instead (mise ≥ 2026.9.13), and mise renders it 0600 whatever the source's
+> mode, reporting drift as `differs (permissions differ)`:
+>
+> ```toml
+> "~/.ssh/config" = { source = "~/.dotfiles-custom-mise/templates/ssh_config.tmpl", mode = "template", permissions = "0600" }
+> ```
+>
+> Measured: a 0664 source rendered 0600, and a second apply was a no-op.
+> `setup:custom-hookup` still tightens `~/.ssh/*` template *sources* to 0600
+> for companions that don't declare it. `~/.ssh` itself is 0700 by this repo's
+> own permissions-only entry, applied in the same run that creates it.
+>
+> `permissions` works only on `copy`/`template` entries or inline `content` —
+> on a `symlink` mise drops the entry with a warning, which `lint-config.py
+> --live` reports. Never declare a permissions-only `"~/.ssh"` here: this repo
+> owns that key.
 
 ## Your git identity goes here, not in `git config --global`
 

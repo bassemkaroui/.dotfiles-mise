@@ -2,7 +2,7 @@
 #MISE description="Add or remove this machine's profiles in miserc.toml (interactive)"
 #MISE raw=true
 #USAGE flag "--list" help="Print the current selection and exit"
-#USAGE flag "--no-converge" help="Only write miserc.toml; skip the bootstrap/cleanup offer"
+#USAGE flag "--no-converge" help="Only write miserc.toml; skip the unapply/bootstrap/cleanup offers"
 set -eo pipefail
 
 # shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
@@ -302,9 +302,8 @@ ok_changed "$MISERC updated"
 info "now: ${SELECTED[*]:-none}"
 
 if ((${#REMOVED[@]} > 0)); then
-    warn "Removing a profile does not uninstall what it already installed, and"
-    warn "'mise run cleanup' only reaps DANGLING links — a deselected profile's"
-    warn "links still point at files that exist, so they are left in place."
+    warn "Packages and tools a removed profile installed stay installed. What it"
+    warn "DEPLOYED (links, managed files) is offered for removal below."
 fi
 
 # ─── Converge ─────────────────────────────────────────────────────────────────
@@ -313,8 +312,15 @@ fi
 # bootstrap at step 7 — converging here would duplicate that (and run before
 # install.sh has finished preparing the machine).
 if [[ "$NO_CONVERGE" == "true" || "$NO_CONVERGE" == "1" ]]; then
+    ((${#REMOVED[@]} == 0)) \
+        || info "remove what ${REMOVED[*]} deployed: mise bootstrap unapply ${REMOVED[*]}"
     exit 0
 fi
+
+# Set to 0 once the unapply offer below has run; until then, next_steps prints
+# the command instead.
+UNAPPLY_PENDING=0
+((${#REMOVED[@]} == 0)) || UNAPPLY_PENDING=1
 
 # A profile file that is not yet linked into $CONF is INVISIBLE to the mise
 # process a converge starts. mise resolves its config set once, at startup, and
@@ -346,6 +352,8 @@ done
 # next_steps <lead-in> — how to converge by hand. Two forms: the one-command
 # form is wrong whenever PRELINK is non-empty, for the reason above.
 next_steps() {
+    ((UNAPPLY_PENDING == 0)) \
+        || info "remove what ${REMOVED[*]} deployed: mise bootstrap unapply ${REMOVED[*]}"
     if ((${#PRELINK[@]} == 0)); then
         info "$1: mise bootstrap --yes"
         return
@@ -360,6 +368,51 @@ have mise || {
     next_steps "next"
     exit 0
 }
+
+# ─── Unapply what the removed profiles deployed ───────────────────────────────
+# `mise bootstrap unapply <env>...` (mise ≥ 2026.9.13) loads config.<env>.toml
+# even though the env is no longer selected, and removes the dotfiles, managed
+# files, directories and user services it declares — plus any empty parent
+# directory mise created for them. Anything still declared by a selected
+# config is kept, and so is a target changed since it was applied (we never
+# pass --force). Packages, repos and tools are out of its scope; it prints how
+# to prune packages. Before this existed, a deselected profile's links outlived
+# it for good: `mise run cleanup` only reaps DANGLING links, and these still
+# resolve.
+#
+# REMOVED only, never the whole old selection: measured on 2026.9.15, unapply
+# removes an env's resources even while that env is still selected — they come
+# back on the next bootstrap, but that is churn nobody asked for. A task-only
+# profile (veracrypt, laptop, ...) has no config file; unapply reports "nothing
+# to remove" and exits 0.
+#
+# The dry run's PLAN is on stdout and its notes on stderr ("nothing to remove",
+# the packages hint), so an empty stdout means there is nothing to ask about.
+# config.<env>.toml must still be linked for this to see anything — it is: the
+# self-management glob links every profile file whether selected or not.
+if ((UNAPPLY_PENDING)); then
+    # Whatever happens below, the user has now seen the outcome or the command,
+    # so next_steps must not repeat it (or suggest undoing what was just undone).
+    UNAPPLY_PENDING=0
+    printf '\n'
+    info "checking what ${REMOVED[*]} deployed ..."
+    plan_rc=0
+    plan="$(env -u MISE_ENV mise bootstrap unapply --dry-run "${REMOVED[@]}")" || plan_rc=$?
+    if ((plan_rc != 0)); then
+        warn "unapply preview failed (rc=$plan_rc) — nothing removed; see above"
+    elif [[ -z "$plan" ]]; then
+        ok "nothing deployed by ${REMOVED[*]} to remove"
+    else
+        printf '%s\n' "$plan" | sed 's/^/    /'
+        read -rp "  Remove these now? [Y/n] " a || a=n
+        if [[ ! "$a" =~ ^[Nn]$ ]]; then
+            env -u MISE_ENV mise bootstrap unapply --yes "${REMOVED[@]}" \
+                || warn "unapply exited non-zero — see above"
+        else
+            info "kept; remove later with: mise bootstrap unapply ${REMOVED[*]}"
+        fi
+    fi
+fi
 
 # MISE_ENV is exported into this task from the OLD miserc.toml. A child `mise`
 # would inherit it and re-apply the selection we just replaced, so drop it and

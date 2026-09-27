@@ -288,7 +288,12 @@ jobs:
           # silently, so install.sh must back it up first.
           mkdir -p /home/tester/.ssh
           printf 'Host precious\n  HostName 203.0.113.9\n' > /home/tester/.ssh/config
-          chmod 700 /home/tester/.ssh
+          # 0775, deliberately wrong: the core `"~/.ssh" = { permissions =
+          # "0700" }` entry must repair it, and install.sh's backup pass must
+          # NOT treat its `differs` as a conflict — before that pass skipped
+          # permissions-only entries it would have moved ~/.ssh, keys and all,
+          # to ~/.ssh.pre-mise.bak.
+          chmod 775 /home/tester/.ssh
           chmod 600 /home/tester/.ssh/config
           sha256sum /home/tester/.ssh/config | cut -d' ' -f1 > /tmp/precious.sha
           chown -R tester:tester "$C" /home/tester/.ssh
@@ -372,6 +377,11 @@ jobs:
               || err "~/.ssh/config backup does not match the original"
             grep -q "laptop.example.invalid" "$HOME/.ssh/config" || err "ssh template did not render the laptop branch"
             [[ "$(stat -c %a "$HOME/.ssh/config")" == "600" ]] || err "rendered ~/.ssh/config is not mode 600"
+
+            # --- permissions-only entries: repaired in place, never backed up ---
+            [[ ! -e "$HOME/.ssh.pre-mise.bak" ]] || err "install.sh moved ~/.ssh aside (permissions-only entry treated as a conflict)"
+            [[ "$(stat -c %a "$HOME/.ssh")" == "700" ]] || err "~/.ssh is not 0700 (was planted at 0775)"
+            [[ "$(stat -c %a "$HOME/.gnupg")" == "700" ]] || err "~/.gnupg is not 0700"
 
             # --- login shell: the two defects CI exists to catch ---
             out="$(bash --login -c "echo LOGIN_OK" </dev/null)"
@@ -578,4 +588,7 @@ jobs:
             mise bootstrap status            # human-readable, for the log
             mise bootstrap status --missing  # and this one actually fails
             mise bootstrap dotfiles status --missing
+            # The [doctor.checks] in mise/config.toml, on a machine install.sh
+            # just converged twice: every one must PASS (rc 1 on any FAIL).
+            mise doctor project
           '

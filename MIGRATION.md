@@ -106,10 +106,12 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   still caught by `lint-config.py --live`, which `install.sh` runs.
 
 ### Known mise limitations we compensate for
-- No removal semantics in `[dotfiles]` → `mise run cleanup` + this doc. Renaming or deleting a
-  `config.<profile>.toml` leaves a dangling link in `~/.config/mise` that nothing reports (`config
-  ls`, `mise bootstrap dotfiles status` and `doctor` all stay silent) while that profile quietly
-  stops applying — run `mise run cleanup` after any such change.
+- Removal in `[dotfiles]` only works while the entry still exists: `mise bootstrap dotfiles
+  unapply <target>` (and, for a deselected profile, `mise bootstrap unapply <profile>` — mise
+  ≥ 2026.9.13, offered by `setup:profiles`) read the live config. Renaming or deleting a
+  `config.<profile>.toml` still leaves a dangling link in `~/.config/mise` that nothing reports
+  (`config ls`, `mise bootstrap dotfiles status` and `doctor` all stay silent) while that
+  profile quietly stops applying — run `mise run cleanup` after any such change.
 - `--force` is never safe here: on the self-management entries it replaces the repo's own
   config files with symlink loops and silently drops the global config. `install.sh` moves
   conflicting files aside instead.
@@ -140,8 +142,10 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   A typo'd target is therefore invisible; `scripts/lint-config.py` checks every entry's source
   exists in the repo to compensate.
 - **mise creates missing parent directories with the process umask** (0755/0775), which gpg
-  rejects for `~/.gnupg`. A `pre-dotfiles` hook creates it 0700 first; re-applying does not
-  change the mode afterwards.
+  rejects for `~/.gnupg`. Permissions-only `[dotfiles]` entries (mise ≥ 2026.9.13) set
+  `~/.gnupg` and `~/.ssh` to 0700 in the same apply that creates them, and report drift in
+  `mise bootstrap status`. (Until 2026-09 a `pre-dotfiles` chmod hook plus a
+  `[bootstrap.directories]` pair did this between them.)
 - **`git config --global` writes THROUGH a symlink.** git resolves a symlinked
   `~/.gitconfig` and rewrites its target: the link survives, the repo file changes
   (verified). With this repo public, one `git config --global user.email`, `gh auth login`
@@ -175,8 +179,10 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   point is neither deployed nor safe to create. If you hit this running `mise bootstrap`
   directly, export the same three variables.
 - **git carries no file modes** beyond the executable bit, so a template committed 0600 renders
-  0664 from a clone — and ssh rejects a group-writable config outright.
-  `setup:custom-hookup` re-applies 0700/0600 under `~/.ssh` after applying.
+  0664 from a clone — and ssh rejects a group-writable config outright. Declare
+  `permissions = "0600"` on the companion's `~/.ssh/config` entry (see CUSTOM.md);
+  `setup:custom-hookup` also tightens `~/.ssh/*` template sources to 0600 before applying, for
+  companions that don't.
 - **No `[bootstrap.user]` section, deliberately.** Its one command is a bare `chsh -s`, which
   PAM-prompts and so fails unattended — and a failing bootstrap step aborts every later step,
   including the whole `[tasks.bootstrap]` tail. `setup:login-shell-fallback` owns the login
@@ -187,9 +193,10 @@ Working document. Cutover checklist at the bottom is the only part end users nee
   anything environmental (no network, no sudo, no desktop session, no upstream asset for
   this Ubuntu release) as `warn` + `exit 0` rather than a failure.
 - **`mise run cleanup` reaps only DANGLING links** — ones whose source left the repo. It
-  does *not* reap links whose profile was deselected, because mise has no removal semantics
-  and the source is still right there. Deselecting `gnome` leaves `~/.themes/*` behind;
-  delete those by hand when switching desktops.
+  does *not* reap links whose profile was deselected, because the source is still right there.
+  That is `mise bootstrap unapply <profile>`'s job, which `setup:profiles` offers on removal.
+  Neither touches what a profile's *tasks* installed (apps, fonts, extensions) — those stay
+  until removed by hand.
 - **ANY untracked, non-gitignored file in ANY `[bootstrap.repos]` clone aborts the whole
   bootstrap** at the repos step (step 2 of 11) — `mise ERROR repos: ~/x has local changes`, rc=1,
   and dotfiles/tools/the task chain never run (verified 2026-07-21). This is not hypothetical:
@@ -258,7 +265,8 @@ Working document. Cutover checklist at the bottom is the only part end users nee
    - `~/.zshrc.local`: extra PATH entries (`/usr/share/code/bin`, `/usr/local/go/bin`),
      vagrant completion fpath, java stanzas, work tooling.
    - `~/.zshenv.local` / `~/.bashrc.local`: anything else machine-specific.
-7. Verify: `mise bootstrap status --missing` exits 0; open a new shell; run `mise doctor`.
+7. Verify: `mise bootstrap status --missing` exits 0; `mise doctor project` passes every
+   check; open a new shell; run `mise doctor`.
 8. Wire the companion repo — clone it to `~/.dotfiles-custom-mise` (see [CUSTOM.md](CUSTOM.md))
    and **re-run `~/.dotfiles-mise/install.sh`**, not `mise bootstrap`. Only `install.sh` runs the
    old-repo guard, the live collision lint and the conflict backup, and the companion's

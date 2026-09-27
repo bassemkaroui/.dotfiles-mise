@@ -16,9 +16,12 @@ Checked namespaces (each key must appear in at most one file):
   - [tools] entries
   - [vars] keys
   - [tasks.*] names
+  - [doctor.checks.*] names
 
 Also enforced: mise's own config is self-managed by exactly two entries in
 config.toml; no other file may declare a ~/.config/mise/** dotfiles target.
+And every [dotfiles] `mode`, `manifest` and `permissions` value mise would
+ignore with a mere warning is an error here.
 
 Modes:
   (default)  lint the repo's tracked config files
@@ -62,10 +65,10 @@ NAMESPACES = [
     "bootstrap.repos",
     "bootstrap.packages",
     # A profile file (or a companion drop-in) redeclaring a hook silently
-    # REPLACES it by undefined precedence rather than adding to it. The one in
-    # config.toml creates ~/.gnupg and ~/.ssh at 0700 before the dotfiles step;
-    # losing it means gpg refuses its homedir and ssh refuses its config
-    # — with no error from mise at any point.
+    # REPLACES it by undefined precedence rather than adding to it. The ones in
+    # config.toml create ~/.ssh private before the dotfiles step and rebuild
+    # bat's theme cache after tools; losing either fails with no error from
+    # mise at any point.
     "bootstrap.hooks",
     # The declarative resource sections mise gained in 2026.8.x. They are
     # convergent singletons exactly like the older namespaces: two files
@@ -87,6 +90,9 @@ NAMESPACES = [
     "env",
     "alias",
     "tasks",
+    # `mise doctor project` checks (2026.9.6). Same singleton rule: two files
+    # defining one check name leave one of them silently unrun.
+    "doctor.checks",
 ]
 
 # mise ignores an unknown mode "with a warning" (dotfiles.md) — the entry is
@@ -104,6 +110,33 @@ VALID_MODES = {"symlink", "symlink-each", "copy", "template"}
 # reporting "no dotfiles configured", and the target is never created.
 VALID_MANIFESTS = {"git"}
 MANIFEST_MODES = {"copy", "symlink-each"}
+
+# `permissions` (2026.9.13) is the same silent class a third time. Measured on
+# 2026.9.15, each one a WARN, the entry dropped, and the apply still rc 0 with
+# "no dotfiles configured":
+#   permissions = 448                  -> invalid file entry: data did not match
+#                                         any variant of untagged enum
+#   permissions = "0799"               -> permissions must be an octal string
+#                                         between "0000" and "7777"
+#   permissions on mode = "symlink"    -> permissions requires mode copy or
+#                                         template, or inline content
+# ("700" without the leading zero is accepted and applied as 0700.)
+PERMISSIONS_RE = re.compile(r"^[0-7]{3,4}$")
+PERMISSIONS_MODES = {"copy", "template"}
+
+
+def is_permissions_only(value: object) -> bool:
+    """An entry that only manages an existing target's mode.
+
+    No source, no content, no mode: mise then never creates the target and
+    never infers a source from dotfiles.root, and `status --json` reports it
+    as `mode: "permissions"`. Kept in step with scripts/dotfiles-targets.py.
+    """
+    return (
+        isinstance(value, dict)
+        and "permissions" in value
+        and not any(k in value for k in ("source", "content", "mode"))
+    )
 
 
 def flatten_settings(data: dict, prefix: str = "") -> dict:
@@ -294,6 +327,45 @@ def check_manifests(rel: str, data: dict, problems: list[str]) -> None:
             )
 
 
+def check_permissions(rel: str, data: dict, problems: list[str]) -> None:
+    """A `permissions` value mise would drop with a warning (see PERMISSIONS_RE).
+
+    Two shapes are legal: permissions-only (an existing target's mode, nothing
+    else — its target may not be a glob, per dotfiles.md), and permissions on a
+    copy/template/inline-content entry. Anything else is a WARN, the entry is
+    dropped, and — for the ~/.gnupg / ~/.ssh entries in config.toml — gpg and
+    ssh are left to refuse a directory nobody reports as wrong.
+    """
+    default_mode = flatten_settings(data).get("dotfiles.default_mode", "symlink")
+    for key, value in extract("dotfiles", data).items():
+        if not isinstance(value, dict) or "permissions" not in value:
+            continue
+        perms = value["permissions"]
+        if not isinstance(perms, str) or not PERMISSIONS_RE.match(perms):
+            problems.append(
+                f"BAD PERMISSIONS: [dotfiles] {key!r} in {rel} has permissions={perms!r} — "
+                f"mise ignores the entry with a warning. Use an octal STRING such as \"0700\""
+            )
+            continue
+        if is_permissions_only(value):
+            if any(c in key for c in "*?["):
+                problems.append(
+                    f"BAD PERMISSIONS: [dotfiles] {key!r} in {rel} is permissions-only with a "
+                    f"wildcard target, which mise does not allow"
+                )
+            continue
+        if "content" in value:
+            continue
+        mode = value.get("mode", default_mode)
+        if mode not in PERMISSIONS_MODES:
+            problems.append(
+                f"PERMISSIONS/MODE MISMATCH: [dotfiles] {key!r} in {rel} sets permissions with "
+                f"mode={mode!r} — a link has no mode of its own, so mise ignores the entry with "
+                f"a warning and it never deploys. permissions needs one of "
+                f"{sorted(PERMISSIONS_MODES)}, inline content, or no source/mode at all"
+            )
+
+
 def check_sources(rel: str, data: dict, problems: list[str]) -> None:
     """A [dotfiles] entry whose source is missing aborts the whole apply.
 
@@ -349,6 +421,8 @@ def check_repo_sources(rel: str, data: dict, problems: list[str], live: bool = F
     """
     root = dotfiles_root()
     for key, value in extract("dotfiles", data).items():
+        if is_permissions_only(value):
+            continue  # mise never infers a source for these; nothing to stat
         source = entry_source(value)
         if isinstance(source, str):
             if not is_absolute_source(source):
@@ -500,12 +574,13 @@ def main() -> int:
         # Self-management applies in both modes — machine-local drop-ins are the least
         # reviewed files on the box, so they get the same check.
         check_self_managed(path, rel, data, problems)
-        # Both modes: a relative source, an unknown mode and a bad manifest are
-        # wrong wherever they are declared, and none produces an error from
-        # mise.
+        # Both modes: a relative source, an unknown mode, a bad manifest and a
+        # bad permissions value are wrong wherever they are declared, and none
+        # produces an error from mise.
         check_relative_sources(rel, data, problems)
         check_modes(rel, data, problems)
         check_manifests(rel, data, problems)
+        check_permissions(rel, data, problems)
         # check_repo_sources covers sourceless entries (silently dropped by
         # mise) and in-repo ones; check_sources covers absolute/machine paths,
         # which only exist — and can only be stat'ed — on a real machine.

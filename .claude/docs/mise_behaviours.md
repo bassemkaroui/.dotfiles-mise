@@ -6,7 +6,9 @@ claimed. **Re-verify on a mise version bump.** `sandbox/mkhome.sh` gives you a t
 to do it in.
 
 Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
-(entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14.
+(entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14. Re-verified against
+**2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new. The repo now
+requires 2026.9.15 (`install.sh` refuses older).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -58,20 +60,29 @@ deduped by path, no double-apply. It does mean "keep tools out of a repo-root se
 directory doesn't shadow globals" was never a real mitigation. Renaming `mise/` would make it
 undiscoverable, if repo-directory inertness ever matters.
 
-### 5. Trust is per-file, and the two failure modes are opposite
+### 5. Trust is per-file — and mostly implicit for the global config directory
 
 - `mise trust <dir>` does **not** cover the files inside it. One untrusted file makes every
   later mise call exit non-zero — which, under `pipefail`, killed `install.sh`. It now trusts
   each `config*.toml` and `conf.d/*.toml` individually.
-- An untrusted **global** config is a hard error.
-- An untrusted **`conf.d/` drop-in is silently ignored** — `mise bootstrap dotfiles status` exits
-  0, says nothing about trust, and the drop-in's entries simply do not exist. This is what the
-  companion repo would hit on a fresh machine, where the drop-in is created near the end of the
-  bootstrap chain, long after `install.sh`'s trust loop. `setup:custom-hookup` therefore trusts it
-  itself.
+- An untrusted **global** config is a hard error — in the demotion case below. The ordinary
+  `~/.config/mise/config.toml` (and, since the reversal below, its `conf.d/`) is implicitly
+  trusted: on 2026.9.15 the repo's linked config loaded with `mise trust --show` listing nothing.
+- **Reversed on 2026.9.15:** an untrusted `conf.d/` drop-in *was* silently ignored on 2026.7.x —
+  `mise bootstrap dotfiles status` exited 0, said nothing about trust, and the entries did not
+  exist. Re-verified in a throwaway `$HOME` with `MISE_TRUSTED_CONFIG_PATHS` unset and `mise
+  trust --show` listing nothing: a never-trusted drop-in in the global `conf.d` (a symlink into a
+  companion under `$HOME`) now loads in full — `[dotfiles]`, `[env]` templates and `[tasks]`
+  alike. Only `mise trust --ignore <file>` hides it, the same silent way (and that command
+  answered `ignored ~`, i.e. it keyed on the config root, not the file). `setup:custom-hookup`
+  and `install.sh` still trust the drop-in: free, and the old behaviour cost a whole companion.
+  **Beware testing this from an agent shell:** this machine exports `MISE_TRUSTED_CONFIG_PATHS`,
+  which a probe inherits unless it unsets it.
 - A pre-existing real `~/.config/mise/config.toml` (any machine that used mise before) errors as
   untrusted once `MISE_GLOBAL_CONFIG_FILE` points elsewhere — the override appears to demote the
   normal global config out of implicit trust. `install.sh` backs it up before the first run.
+  Still true on 2026.9.15 for a config with `[env]` templates / `[tasks]` (`Config files in
+  ~/.config/mise/config.toml are not trusted`, rc 1); one holding only `[tools]` loads.
 
 ---
 
@@ -119,7 +130,9 @@ delete the entry**; the `cleanup` task is the reaper for everything already orph
 removes links that are both dangling and pointing into this repo.
 
 Note what `cleanup` does **not** do: deselecting a profile leaves its already-deployed files
-alone, because the source still exists. That is a manual delete.
+alone, because the source still exists. Since 2026.9.13 mise covers that case —
+`mise bootstrap unapply <profile>`, entry 39 — precisely because a deselected profile's config
+file is still on disk: here the live-config rule works *for* you.
 
 ### 9. Self-managing config works, with two hard requirements
 
@@ -150,7 +163,9 @@ clone, and why it must live at `~/.dotfiles-custom-mise`.
 Re-verified on 2026.8.16, including against the 2026.8.x `config_source` template variable, which
 does resolve a symlinked config to its real directory in `[env]`: `{{ config_root }}/src.txt` and
 `{{ config_source | canonicalize | dirname }}/src.txt` were both reported verbatim, braces and
-all, in the resolved source path.
+all, in the resolved source path. Again on 2026.9.14 inside a `conf.d` *folder* fragment (entry
+43), where `{{ config_root }}` does render in `[env]` — to the folder — but a `source` of
+`{{ config_root }}/home/x` came back `source missing` with the braces intact.
 
 `[bootstrap.files].source` behaves the same way and **fails harder**. Verified through a config
 reached by symlink: mise resolved the source against the *link's* directory, and `mise bootstrap
@@ -162,8 +177,11 @@ rejects a relative source in either namespace.
 ### 12. mise creates missing parent directories with the process umask
 
 Observed 0775 at umask 002. `gpg` refuses a group/world-readable `~/.gnupg`, and `ssh` refuses
-a group/world-writable `~/.ssh`, so a `pre-dotfiles` hook creates both at 0700 first. Applying
-does not touch the mode of an existing directory, so it converges.
+a group/world-writable `~/.ssh`. Until 2026-09 a `pre-dotfiles` hook created and chmod'ed both,
+doubled by a `[bootstrap.directories]` pair for reporting. Permissions-only `[dotfiles]` entries
+replaced both (entry 38): they fix the mode in the same apply that creates the directory. The
+hook survives only as `mkdir -p -m 700 ~/.ssh`, to spare an absent `~/.ssh` the per-apply
+warning.
 
 ---
 
@@ -276,8 +294,8 @@ never ran.
 
 This is why every vendor app (one whose packages live in a third-party repo) is a task with a
 `skip`, never a `[bootstrap.packages]` entry. mise's apt manager installs from repos that are
-already configured; it never adds a repo or a key. Nor does it refresh their lists unless there
-are none at all — see #37.
+already configured; it never adds a repo or a key. Up to 2026.9.14 it did not refresh their lists
+either unless there were none at all; 2026.9.15 retries once after an `apt-get update` — see #37.
 
 ### 22. `[bootstrap.repos]` is all-or-nothing, and `url` is not templated
 
@@ -341,8 +359,9 @@ matter what `MISE_FETCH_REMOTE_VERSIONS_TIMEOUT` says — the override is silent
 path. The real bootstrap tool installs are *not* fast commands and do honour the full timeout.
 
 Corollary that bit `install.sh`: do not try to `mise exec`-install `gh` in order to fetch a
-GitHub token. That is the one 3s-capped step, and it needs the very API that is failing. Use
-`gh` only if already present, else take a pasted token.
+GitHub token. That is the one 3s-capped step, and it needs the very API that is failing. Moot
+since 2026.9.14 (entry 41): `install.sh` no longer fetches a token at all — it only passes on
+one it finds.
 
 Also: `mise settings get <key>` **echoes the raw env value unchanged** (even `bogus`), so it
 never confirms that a value parses or is applied. Do not use it as verification.
@@ -487,12 +506,14 @@ whenever the network hiccups. Fonts therefore stay in `setup:fonts`, which runs 
 the `graphical` profile, and `skip`s on a failed download. See also behaviour #32: `brew` creates
 `/home/linuxbrew/.linuxbrew` with sudo, and packages are step 2 — before dotfiles and tools.
 
-### 36. `mise dotfiles` is deprecated in favour of `mise bootstrap dotfiles`
+### 36. `mise dotfiles` was deprecated in favour of `mise bootstrap dotfiles` — then restored
 
-`mise dotfiles --help` on 2026.8.16 opens with "Manage dotfiles from `[dotfiles]` (deprecated) —
-use `mise bootstrap dotfiles` instead". The old spelling still works and prints no warning at
-runtime, so nothing broke; every call site in this repo (install.sh, CI, `sandbox/mkhome.sh`, the
-docs) uses the new one. Flags are identical across the two spellings: `status -J/--json/--missing`,
+`mise dotfiles --help` on 2026.8.16 opened with "Manage dotfiles from `[dotfiles]` (deprecated) —
+use `mise bootstrap dotfiles` instead". **Reversed in 2026.9.8**: "The full dotfiles command tree
+is now available as `mise dotfiles`, with `mise dot` as a short alias. `mise bootstrap dotfiles`
+remains supported and all three spellings share the same behavior". On 2026.9.15 the `--help`
+no longer says deprecated. Every call site in this repo (install.sh, CI, `sandbox/mkhome.sh`, the
+docs) uses `mise bootstrap dotfiles`, now for consistency rather than necessity. Flags are identical across the two spellings: `status -J/--json/--missing`,
 `apply -n/-y/-f`, `add --changed/-m/-s/-p/-g/-l/--no-apply`. The subcommand list also gained
 `diff` (current vs desired, per entry — a file count for `symlink-each`), `unapply` (see #8) and
 `edit`.
@@ -501,7 +522,7 @@ docs) uses the new one. Flags are identical across the two spellings: `status -J
 
 ## Found on 2026.9.x
 
-### 37. The packages step refreshes apt's lists only when there are none
+### 37. The packages step refreshed apt's lists only when there were none — fixed in 2026.9.15
 
 `/var/lib/apt/lists` empty (a fresh container) → mise runs `apt-get update` before installing.
 Lists present → it never does, however stale or incomplete they are. A freshly installed desktop is
@@ -518,6 +539,130 @@ what it looks like on a real machine. Two flags refresh, and only one is safe he
   (2026.9.13 `--help`), i.e. the unpinned clones of #24 get pulled too. Upgrades are opt-in in this
   repo, so this is not the fix.
 
-`install.sh` (step 7c) runs `sudo apt-get update` before its `mise bootstrap` whenever
-`packages status --json` shows an apt entry that is not `installed`, so a re-run on a converged
-machine asks for no sudo.
+**Fixed in 2026.9.15**: "On apt systems, mise now simulates the install first and runs `apt-get
+update` once if the simulation fails." Measured in `ubuntu:24.04` after `apt-get update` and then
+deleting the universe lists (so `nala` has no candidate): 2026.9.14 died `E: Unable to locate
+package nala`, rc 1; 2026.9.15 fetched `noble-updates/universe` itself and installed, rc 0.
+`install.sh` step 7c, which ran `sudo apt-get update` first for exactly this, was retired with the
+move to a 9.15 floor.
+
+Two caveats, both measured the same way on 2026.9.15:
+
+- **mise treats `apt-get update`'s exit 100 as fatal.** With a broken third-party source on the
+  machine (a vendor repo a task added, since moved or re-keyed) *and* stale lists, the retry's
+  `apt-get update` fails on that one source (`Some index files failed to download`, exit 100)
+  and mise aborts the packages step — the distro package it was fixing never installs. A manual
+  `sudo apt-get update` refreshes the healthy sources anyway, after which the install works;
+  with current lists no update runs and the broken source is irrelevant. The retired 7c had
+  that tolerance (`|| warn`). A first install cannot hit this — vendor repos are added by the
+  task tail, after packages — a re-run can.
+- **The docs lag the behaviour.** The v2026.9.15 `bootstrap/packages/apt.md` still says mise
+  "does not touch apt metadata" when lists exist, and `bootstrap/files.md` that "changing
+  repository files does not automatically refresh metadata". The changelog and the binary say
+  otherwise (entry 44).
+
+### 38. Permissions-only `[dotfiles]` entries (2026.9.13) — and the backup trap they set
+
+`"~/.ssh" = { permissions = "0700" }`: no source, no content, no mode. mise never creates the
+target, never infers a source from `dotfiles.root`, and only chmods what exists. Measured on
+2026.9.14/9.15 in throwaway `$HOME`s:
+
+- A directory another entry creates in the same apply gets the mode — `~/.gnupg` via the
+  `gpg-agent.conf` link, and `~/.ssh` via the companion's `~/.ssh/config` template, which lives
+  in a *different* config file.
+- It runs under `mise bootstrap --only dotfiles` and a standalone `mise bootstrap dotfiles
+  apply` — the two paths `[bootstrap.directories]` never reached (entry 12).
+- Drift: text `differs (permissions differ)`, JSON `mode: "permissions", state: "differs"`, and
+  `dotfiles status --missing` exits 1. `mise bootstrap status` lists it; **`mise bootstrap plan`
+  does not** — it covers no `[dotfiles]` at all ("nothing configured for bootstrap planning").
+- Absent target: `WARN [dotfiles]."~/.ssh": ~/.ssh does not exist; permissions not set` on
+  every apply; status counts it applied, so `--missing` stays 0.
+- On a template, `permissions = "0600"` renders 0600 from a 0664 source, and a second apply is a
+  no-op — status compares against the declared mode, not the source's.
+- The silent class again (entries 6, 34): `permissions = 448` (a TOML int), `"0799"`, and
+  permissions on `mode = "symlink"` are each a WARN, the entry dropped, rc 0. `"700"` is accepted.
+  `lint-config.py` (`check_permissions`) rejects all three, plus a wildcard permissions-only key.
+
+**The trap:** `differs` is what `install.sh` and `setup:custom-hookup` back up by `mv`-ing the
+target aside. Before both learned to skip `mode: "permissions"`, a 0775 `~/.ssh` would have gone
+to `~/.ssh.pre-mise.bak`, keys included — measured with the old filter, which printed `~/.gnupg`
+and `~/.ssh` for a drifted sandbox. `scripts/dotfiles-targets.py` never lists these entries, and
+CI's e2e plants a 0775 `~/.ssh` to keep it that way.
+
+### 39. `mise bootstrap unapply <env>...` (2026.9.13) removes what a profile deployed
+
+It loads `config.<env>.toml` even though the env is not selected and removes the dotfiles,
+managed files, directories and user services it declares, plus empty parent directories mise
+created. Measured on 2026.9.14/9.15:
+
+- `unapply yazi graphical` with neither selected removed `~/.config/yazi`,
+  `~/.config/ghostty/config{,.ghostty}` and the emptied `~/.config/ghostty`, kept core entries, and
+  noted "N declaration(s) in [bootstrap.packages] are not removed by unapply: mise bootstrap
+  packages prune --manager <manager>". A second run: "nothing to remove", rc 0.
+- **It removes an env's resources even while the env is still selected** (`MISE_ENV=yazi mise
+  bootstrap unapply --dry-run yazi` planned `rm ~/.config/yazi`). Pass only deselected profiles.
+- An env with no config file (a task-only profile) → "nothing to remove", rc 0.
+- The dry-run **plan goes to stdout**, the notes ("nothing to remove", the packages hint) to
+  stderr — so an empty stdout means nothing to do. `setup:profiles` relies on that.
+- Without a TTY and without `--yes` it refuses: "requires confirmation but there was nobody to
+  ask", rc 1.
+
+### 40. `[doctor.checks]` work from the global config (2026.9.6)
+
+`mise doctor project` runs `[doctor.checks.<name>]` declared in `~/.config/mise/config*.toml`
+from **any** cwd, with installed tools on `PATH` (`tree-sitter --version` passes), and exits 1
+when one fails. Plain `mise doctor` does not run them. The default timeout is 10s and it is
+real: a probe wrapping `mise run cleanup --dry-run` took 67s of CPU on this machine (the task
+walks `~/.local/share`) and was reported `ERROR ... timed out after 60s` — which is why there is
+no stale-links check. Checks are singletons like everything else (`doctor.checks` is a lint
+namespace).
+
+### 41. GitHub release metadata goes through mise-versions (2026.9.14)
+
+For `github:` and `aqua:` tools outside the registry too, version listing, release lookup and
+attestation lookup now go to `mise-versions.jdx.dev`. Measured on 2026.9.15 with `GITHUB_TOKEN`
+unset and a throwaway `$HOME` (no gh login): `mise latest` over all 40 tools this repo declares
+made 110 requests to mise-versions and 4 to `api.github.com` (neofetch and resvg fall back to it);
+installing tuicr, gh-dash, btop, neofetch, doppler, hunk and croc made 82 and 4 (doppler's
+release tag, neofetch). A tokenless install is nowhere near the 60/hour cap, which is why
+`install.sh` stopped offering a `gh auth login`. mise falls back to `api.github.com` whenever
+mise-versions fails other than with a 404, and private repos always go there.
+
+### 42. `dotfiles status` text grew a history trailer
+
+On 2026.9.14+ the human-readable `mise bootstrap dotfiles status` ends with `History: tracking
+N entries …`, an `automatic capture: not declared …` hint and `Setup repository: none …` — from the
+dotfiles-history feature, which this repo does not use. `--json` is unchanged. Nothing here parses
+the text (CI only asserts it is non-empty), but a new text consumer must filter those lines.
+
+### 43. `conf.d` *folder* fragments (2026.9.14) — measured for a possible companion move
+
+Not adopted yet; recorded because it would lift two companion rules (CUSTOM.md 1 and 4).
+`~/.config/mise/conf.d/50-custom -> ~/companion` (a folder holding `mise.toml`) loads; a relative
+`source = "home/x"` resolves inside the folder **through the link**, and the deployed symlink
+points through it too (`~/.x -> ~/.config/mise/conf.d/50-custom/home/x`); `mise.laptop.toml`
+in the folder loads under `MISE_ENV=laptop`; a second apply is a no-op. Consequence: removing the
+conf.d link — which `setup:custom-hookup` does when the live lint fails — would leave every
+companion link dangling, so that safety net would need rethinking first. `source` is still not
+templated (entry 11). 2026.9.15 also made tasks in a folder fragment run in that folder.
+
+### 44. Vendor apt repos as `pre-packages` files: 9.15 fixes the refresh, not the blast radius
+
+2026.9.5 added `phase = "pre-packages"` so `[bootstrap.files]` can write a repo definition and
+its key before the packages step. Measured on 2026.9.15 in `ubuntu:24.04` with the 1Password repo
+(armored key and deb822 `.sources`, both inline `content`) plus `apt:1password-cli` and a distro
+`apt:tree`:
+
+| case | result |
+| --- | --- |
+| root, repo healthy | files applied → install simulation fails → mise runs `apt-get update` → both installed, rc 0; second run fully converged |
+| root, repo URL broken | `apt-get update` exit 100 → mise ERROR, rc 1 — `tree` **not** installed, nothing after the packages step ran, and the same on every re-run, because the declared file comes back |
+| non-root, no sudo, no TTY | aborts at `system files (pre-packages)` — the first step — with the usual `sudo requires a password` hint; nothing installed |
+
+So the refresh objection is gone, and the other two stand: a privileged declaration fails closed
+(entry 32, now even earlier), and one vendor repo that breaks — a withdrawn release, a rotated
+key, an outage — takes the whole machine's bootstrap down, distro packages included, until the
+config is edited. A task loses one app and `skip`s. Also out of reach declaratively: this repo's
+per-distro codename (`UBUNTU_CODENAME` over `VERSION_CODENAME`, for Mint), and `--no-remove` —
+mise runs a plain `apt-get install -y -- <pkgs>`, so `docker-ce`'s `Conflicts: docker.io` would
+silently remove a hand-installed `docker.io`. Vendor apps stay tasks (`lib/apt_repo.sh`).

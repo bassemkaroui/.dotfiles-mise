@@ -17,6 +17,12 @@ to fix up source permissions (git records no file modes, so a template
 committed 0600 arrives from a clone at 0664 — and template mode gives the
 rendered file the source's mode).
 
+Permissions-only entries (`"~/.ssh" = { permissions = "0700" }`, mise
+2026.9.13) are NOT printed. They write no content — mise only chmods a target
+that already exists — so they are never something to back up, and every caller
+of this script backs up what it prints: listing `~/.ssh` would move the whole
+directory, keys included, to `~/.ssh.pre-mise.bak`.
+
 Exit codes are meaningful, because "this config declares nothing" and "I could
 not read it" must not look alike to a caller that is about to overwrite files:
 
@@ -40,6 +46,18 @@ except ModuleNotFoundError:  # Python < 3.11 (Ubuntu 22.04)
         sys.exit(3)
 
 
+def is_permissions_only(value: object) -> bool:
+    """An entry that only manages a target's mode: no source, content or mode.
+
+    Matches what mise reports as `mode: "permissions"` in `status --json`.
+    """
+    return (
+        isinstance(value, dict)
+        and "permissions" in value
+        and not any(k in value for k in ("source", "content", "mode"))
+    )
+
+
 def main() -> int:
     args = sys.argv[1:]
     with_source = "--with-source" in args
@@ -57,6 +75,8 @@ def main() -> int:
     if not isinstance(entries, dict):
         return 0
     for target, value in entries.items():
+        if is_permissions_only(value):
+            continue
         if not with_source:
             print(target)
             continue

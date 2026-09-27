@@ -70,7 +70,9 @@ than depend on an order that isn't stable, the repo makes collisions impossible 
   than silently resolved
 
 The other checks it carries: self-management invariants, no relative `[dotfiles]` **or**
-`[bootstrap.files]` sources, mode sanity, and the profile registry described above.
+`[bootstrap.files]` sources, and sanity for every `[dotfiles]` value mise would drop with a mere
+warning — `mode`, `manifest` and `permissions` — plus the profile registry described above.
+`[doctor.checks]` names are a collision namespace too.
 
 ---
 
@@ -141,11 +143,16 @@ The default is to declare. A task exists only when mise cannot express the thing
 | public git clones | a clone that might fail (private repo, no credentials) |
 | files with a stable source | links into something an earlier step creates |
 | tool versions, udev rules, groups | group **membership**, `udevadm` reload, `dconf`, `chsh` |
+| directory modes (`permissions`), health probes (`[doctor.checks]`) | the fix a failed probe points at |
 
 The two failure modes that force this:
 
 - **Packages are batched into one `apt-get install`**, so one unresolvable name fails the whole
   step — before dotfiles, tools and the tail. Vendor apps therefore live in tasks with a `skip`.
+  Re-checked on 2026.9.15 against the declarative alternative — the repo and key as
+  `phase = "pre-packages"` `[bootstrap.files]`: mise now refreshes the lists for it, but a
+  broken vendor repo still fails the whole step on every run, distro packages included, and the
+  files need root before anything else runs (behaviour 44).
 - **A failing `[bootstrap.repos]` clone aborts the bootstrap at step 3**, so the private
   companion repo is cloned by `setup:custom-hookup`, which can decline and carry on.
 
@@ -207,13 +214,25 @@ Template gating must guard against an unconfigured machine:
 aborts the entire apply, taking unrelated symlink entries with it.
 
 **Sensitive directories are never whole-directory symlinks** (`~/.gnupg`, `~/.config/gh`,
-`~/.claude`, `~/.ssh`) so live tokens and keys cannot land in the repo tree. A `pre-dotfiles`
-hook creates `~/.gnupg` and `~/.ssh` at 0700 first, because mise would otherwise create them at
-the process umask and both gpg and ssh refuse a too-permissive directory.
+`~/.claude`, `~/.ssh`) so live tokens and keys cannot land in the repo tree. Their *mode* is a
+fifth kind of entry: `"~/.gnupg" = { permissions = "0700" }` and the same for `~/.ssh` — no
+source, no content, mise only chmods what exists (≥ 2026.9.13). mise would otherwise create
+them at the process umask, and gpg and ssh both refuse a too-permissive directory. These run in
+every path that applies dotfiles and report drift in `mise bootstrap status`, which neither a
+chmod hook (silent repair) nor `[bootstrap.directories]` (skipped by `--only dotfiles` and a
+standalone `dotfiles apply`) managed alone; the repo used both until 2026-09. What remains of
+the hook is `mkdir -p -m 700 ~/.ssh`, because a permissions entry never creates its target and
+warns on every apply when it is absent.
+
+The trap they bring: a drifted mode reports `state: differs`, the very state `install.sh` and
+`setup:custom-hookup` back up by moving the target aside. Both skip `mode: "permissions"`, and
+`scripts/dotfiles-targets.py` never lists such an entry — otherwise a 0775 `~/.ssh` would be
+moved to `~/.ssh.pre-mise.bak`, keys and all. Anything new that acts on `differs` must do the
+same; CI plants a 0775 `~/.ssh` to hold that line.
 
 ---
 
-## 7. Removal is manual, and that is a design position
+## 7. Removal reads the live config, so order matters
 
 mise records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and offers `mise bootstrap
 dotfiles unapply`, but it reads the **live config** to decide what an entry owns — so it helps
@@ -223,8 +242,14 @@ Removing the entry first leaves its symlink and nothing reports it. `mise run cl
 reaper for that case, and it is deliberately narrow: it removes only links that are **both**
 dangling **and** pointing into this repo.
 
-What it will not do is undo a *working* deployment. Deselecting a profile leaves its files in
-place, because their sources still exist. That is a manual delete, and `README.md` says so.
+A deselected **profile** is the case the live-config rule favours: its `config.<profile>.toml`
+is still on disk and still linked, so `mise bootstrap unapply <profile>` (≥ 2026.9.13) can
+remove the dotfiles, managed files, directories and user services it declared, plus any empty
+parent directory mise made for them — keeping anything a selected config still declares, and
+any target changed since it was applied. `setup:profiles` previews that and offers it for the
+profiles just removed, and only for those: unapply removes an env's resources even while the
+env is still selected. Packages, repos, tools and whatever a profile's *tasks* installed are
+out of its scope.
 
 ---
 
@@ -288,8 +313,9 @@ Its contract (full version in `CUSTOM.md`):
 - it must live at `~/.dotfiles-custom-mise`, because `[dotfiles].source` is not templated
 
 `setup:custom-hookup` removes the drop-in link again if the live lint fails, so a broken
-companion cannot take the main repo down. It also `mise trust`s the drop-in itself: an untrusted
-`conf.d` file is *silently ignored*, not an error.
+companion cannot take the main repo down. It also `mise trust`s the drop-in itself. On 2026.7.x
+an untrusted `conf.d` file was *silently ignored*, which would have hidden the whole companion;
+on 2026.9.15 a never-trusted global drop-in loads anyway, so the call is insurance now.
 
 ---
 
@@ -304,6 +330,11 @@ companion cannot take the main repo down. It also `mise trust`s the drop-in itse
   combinations, and `e2e`, a real `ubuntu:24.04` container with a non-root passwordless-sudo user
   that runs `install.sh` **twice** and diffs the symlink graph for idempotency.
 - **`.github/workflows/freshness.yml`** — monthly, for upstream drift.
+- **`mise doctor project`** — the `[doctor.checks]` in `mise/config.toml` (and the graphical,
+  cosmic and neovim profile files): read-only probes for the failure modes mise is quiet about
+  (a corrupt `~/.gitconfig`, a dirty clone, dotfile drift, a too-old mise, the login shell).
+  Machine state, not repo state, so it is not part of `repo:lint`; CI's e2e job runs it on the
+  converged container.
 
 Two rules that come from bugs testing alone missed: **run everything twice**, and for anything
 privileged, **stub `sudo`/`apt-get`/`curl` on `PATH` and assert on the logged command lines**

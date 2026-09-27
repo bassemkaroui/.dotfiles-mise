@@ -12,7 +12,7 @@
 # Env:
 #   DOTFILES_PROFILES=graphical,ai,dev   seed ~/.config/mise/miserc.toml non-interactively
 #   DOTFILES_NONINTERACTIVE=1            never prompt; safe defaults
-#   MISE_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN   GitHub API token (see step 2)
+#   MISE_GITHUB_TOKEN / GITHUB_TOKEN / GH_TOKEN   optional GitHub token (see step 2)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +52,25 @@ if ! command -v mise &>/dev/null && [[ ! -x "$HOME/.local/bin/mise" ]]; then
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
+# An EXISTING mise is kept as it is, so check it is new enough. The config
+# leans on 2026.9.x keys that an older mise does not reject but silently drops:
+# `permissions` entries (9.13) read as sourceless dotfiles whose source is
+# missing — ignored, so ~/.ssh and ~/.gnupg modes go unmanaged — and
+# `[doctor.checks]` (9.6) simply never run; setup:profiles also calls `mise
+# bootstrap unapply` (9.13), and step 2's no-token default assumes the
+# mise-versions routing of 9.14. 9.15 adds the apt install simulation that
+# refreshes stale package lists by itself. Not upgraded for you: replacing the
+# binary is the user's call (and impossible for a package-manager install).
+# Keep in step with the `mise-version` check in mise/config.toml.
+MISE_MIN_VERSION="2026.9.15"
+mise_version="$(mise --version 2>/dev/null | cut -d' ' -f1)"
+if [[ -z "$mise_version" ||
+    "$(printf '%s\n' "$MISE_MIN_VERSION" "$mise_version" | sort -V | head -n1)" != "$MISE_MIN_VERSION" ]]; then
+    die "mise ${mise_version:-(unknown)} is older than $MISE_MIN_VERSION, which this config needs —
+      older releases silently ignore parts of it rather than failing.
+      Update it (mise self-update, or your package manager), then re-run."
+fi
+
 # ── 1b. Work around libcurl-gnutls + HTTP/2 before any cloning ────────────────
 # `[bootstrap.repos]` clones at bootstrap step 2, using whatever git is on PATH
 # — on a fresh machine that is apt's git, which Debian/Ubuntu link against
@@ -79,88 +98,41 @@ if git_https_helper="$(git --exec-path 2>/dev/null)/git-remote-https" \
     info "(HTTP/2 + gnutls truncates large packs on some networks; see install.sh)"
 fi
 
-# ── 2. GitHub token ───────────────────────────────────────────────────────────
-# Installing [tools] resolves aqua/github-backed tools through the GitHub
-# releases API (60 req/hr unauthenticated, and throttled/slow when anonymous). A
-# token lifts the cap AND makes responses fast, so it is worth getting one before
-# `mise bootstrap`. It must be exported HERE, in the parent process — hooks and
-# tasks run too late. mise reads it from GITHUB_TOKEN / MISE_GITHUB_TOKEN (and
-# from a gh login).
+# ── 2. GitHub token (optional) ────────────────────────────────────────────────
+# Not needed for a normal install any more. Since mise 2026.9.14, version
+# listing, release lookup and attestation lookup for github:/aqua: tools go
+# through mise-versions.jdx.dev rather than api.github.com (registry tools
+# already did). Measured on 2026.9.15 with no token anywhere: resolving all 40
+# tools this repo declares made 110 requests to mise-versions and 4 to
+# api.github.com (neofetch and resvg fall back to it), and installing the
+# github:/aqua: set added 2 more — against the unauthenticated 60/hour. That
+# retired the interactive `gh auth login` detour this step used to offer.
+#
+# A token that is already at hand is still worth passing on: private repos go
+# to api.github.com with it, and mise falls back to api.github.com whenever
+# mise-versions fails for a reason other than a 404. It must be exported HERE,
+# in the parent process — hooks and tasks run too late.
 #
 # Raise the version-list timeout for the real bootstrap — a slow uplink can
 # exceed the 20s default. This does NOT affect mise's "fast commands" (hook-env,
 # activate, exec, env, ls, current, where, which, shims), which mise HARD-CAPS at
-# 3s "so shims and shell activation do not block". That cap is the whole reason
-# an earlier `mise exec gh@latest` probe timed out at 3.00s — so gh is installed
-# below with `mise install` (NOT a fast command → full timeout), after which
-# `mise exec gh@latest -- gh` runs from the local install without touching the API.
+# 3s "so shims and shell activation do not block".
 export MISE_FETCH_REMOTE_VERSIONS_TIMEOUT="${MISE_FETCH_REMOTE_VERSIONS_TIMEOUT:-60s}"
 
-# Run gh whether it is already on PATH or only mise-installed. Once gh is
-# installed, `mise exec gh@latest -- gh` resolves it from the local install, so
-# this is NOT subject to the 3s fast-command cap (verified).
-gh_run() {
-    mkdir -p "${GH_CONFIG_DIR:-$HOME/.config/gh}" 2>/dev/null || true # gh errors without it
-    if command -v gh &>/dev/null; then
-        gh "$@"
-    else
-        mise exec gh@latest -- gh "$@"
-    fi
-}
-
-if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        export MISE_GITHUB_TOKEN="$GITHUB_TOKEN"
-        ok "GitHub token loaded from \$GITHUB_TOKEN"
-    elif [[ -n "${GH_TOKEN:-}" ]]; then
-        export MISE_GITHUB_TOKEN="$GH_TOKEN"
-        ok "GitHub token loaded from \$GH_TOKEN"
-    elif command -v gh &>/dev/null && gh auth token &>/dev/null; then
-        MISE_GITHUB_TOKEN="$(gh auth token)"
-        export MISE_GITHUB_TOKEN
-        ok "GitHub token loaded from gh CLI"
-    elif [[ "$NONINTERACTIVE" == "1" ]]; then
-        # No terminal for a device-code login (CI, curl | bash). gh still gets
-        # installed later as a [tools] entry; this run just goes unauthenticated.
-        warn "No GitHub token found — installing tools against the unauthenticated"
-        warn "API (60 req/hr). Set GITHUB_TOKEN (a no-scope PAT) and re-run if limited."
-    else
-        warn "No GitHub token found. A token lifts the 60 req/hr cap and speeds"
-        warn "up tool installs. gh can fetch one via a browser device-code login."
-        read -rp "Authenticate with GitHub via gh now? [Y/n] " a || a=n
-        if [[ ! "$a" =~ ^[Nn]$ ]]; then
-            # Make sure gh is present. It is a managed [tools] entry, so the
-            # bootstrap installs it regardless — but to authenticate BEFORE
-            # bootstrap we install it now, with `mise install` (NOT `mise exec`:
-            # exec is a 3s-capped fast command, which is what failed before;
-            # install uses the full timeout above). Non-fatal throughout: a
-            # failed install or login just leaves the run unauthenticated.
-            gh_ready=true
-            if ! command -v gh &>/dev/null; then
-                info "Installing gh to authenticate (one-off; it is a managed tool anyway)..."
-                mise install gh@latest || {
-                    gh_ready=false
-                    warn "Could not install gh — is the GitHub API reachable from here?"
-                }
-            fi
-            if [[ "$gh_ready" == true ]]; then
-                gh_token=""
-                if gh_run auth login && gh_token="$(gh_run auth token 2>/dev/null)" \
-                    && [[ -n "$gh_token" ]]; then
-                    export MISE_GITHUB_TOKEN="$gh_token"
-                    ok "GitHub token obtained via gh"
-                else
-                    warn "gh login did not complete."
-                fi
-            fi
-        fi
-        if [[ -z "${MISE_GITHUB_TOKEN:-}" ]]; then
-            warn "Continuing without a token (best effort). If a tool install is"
-            warn "rate-limited, re-run with GITHUB_TOKEN=ghp_... exported (no scopes)."
-        fi
-    fi
-else
+if [[ -n "${MISE_GITHUB_TOKEN:-}" ]]; then
     ok "GitHub token already set (\$MISE_GITHUB_TOKEN)"
+elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    export MISE_GITHUB_TOKEN="$GITHUB_TOKEN"
+    ok "GitHub token loaded from \$GITHUB_TOKEN"
+elif [[ -n "${GH_TOKEN:-}" ]]; then
+    export MISE_GITHUB_TOKEN="$GH_TOKEN"
+    ok "GitHub token loaded from \$GH_TOKEN"
+elif command -v gh &>/dev/null && gh auth token &>/dev/null; then
+    MISE_GITHUB_TOKEN="$(gh auth token)"
+    export MISE_GITHUB_TOKEN
+    ok "GitHub token loaded from gh CLI"
+else
+    info "No GitHub token — not needed: mise resolves GitHub releases through mise-versions"
 fi
 
 # ── 3. Prepare ~/.config/mise as a REAL directory ─────────────────────────────
@@ -633,6 +605,13 @@ for f in data.get("files", []):
     # pre-existing real file silently — no error, no backup (verified
     # 2026-07-20 against ~/.ssh/config) — where symlink mode at least
     # refuses. Backing up every differing target is the only defence.
+    #
+    # Except a permissions-only entry (mise 2026.9.13): a drifted mode reports
+    # `differs` too, but mise only chmods it — nothing is overwritten — and the
+    # target is a whole directory. `"~/.ssh" = { permissions = "0700" }` at
+    # 0775 would otherwise move ~/.ssh, keys and all, to ~/.ssh.pre-mise.bak.
+    if f.get("mode") == "permissions":
+        continue
     if f.get("state") == "differs" and f.get("target"):
         print(f["target"])
 ' \
@@ -730,49 +709,19 @@ for r in data.get("repos", []):
 }
 guard_repo_health
 
-# ── 7c. Fresh apt lists before the packages step ──────────────────────────────
-# mise's apt manager runs `apt-get update` only when /var/lib/apt/lists holds no
-# lists at all (fresh containers). A freshly installed desktop is not that case:
-# it has lists, just not complete or current ones, and the packages step dies with
-# `E: Unable to locate package nala` / `has no installation candidate` (seen
-# 2026-09-26 on a new machine, mise 2026.9.14: nala, pandoc, ffmpeg, imagemagick
-# and python3-venv, all of it fixed by a manual `sudo apt-get update`). Packages
-# are one batched apt-get install, so a single miss fails the step and every
-# phase after it.
-#
-# Not `mise bootstrap --update`: that also pulls every unpinned clone, and
-# upgrades are opt-in here. Gated on something actually being missing, so a
-# re-run on a converged machine does not ask for sudo just to refresh lists.
-refresh_apt_lists() {
-    command -v apt-get &>/dev/null || return 0
-    local missing
-    missing="$(
-        { mise bootstrap packages status --json 2>/dev/null || true; } \
-            | python3 -c '
-import json, sys
-raw = sys.stdin.read().strip()
-if not raw:
-    sys.exit(0)
-try:
-    data = json.loads(raw)
-except json.JSONDecodeError:
-    sys.exit(0)
-apt = data.get("apt") if isinstance(data, dict) else None
-if not isinstance(apt, dict):
-    sys.exit(0)
-# Anything not "installed" ("missing", a pinned version mismatch) is about to go
-# through apt-get install, which is when stale lists fail.
-print(sum(1 for p in apt.get("packages", [])
-          if isinstance(p, dict) and p.get("state") != "installed"))
-' || true
-    )"
-    [[ "${missing:-0}" -gt 0 ]] || return 0
-    info "Refreshing apt package lists ($missing apt package(s) to install)..."
-    # Non-fatal: one broken third-party source must not block the distro's own
-    # packages, and the packages step reports whatever is still unresolvable.
-    sudo apt-get update || warn "apt-get update failed — continuing; the packages step will say what is unresolvable"
-}
-refresh_apt_lists
+# ── 7c. (retired) apt list refresh ────────────────────────────────────────────
+# This step used to `sudo apt-get update` whenever an apt entry was missing: on
+# 2026.9.14 mise refreshed the lists only when there were none at all, and a new
+# desktop's stale ones failed the whole packages step (behaviour #37). 2026.9.15
+# simulates the install first and runs `apt-get update` once if that fails —
+# measured in ubuntu:24.04 with the universe lists deleted: 9.14 died `Unable to
+# locate package nala`, 9.15 re-fetched them and installed. The step 1 floor
+# guarantees 9.15, so mise owns this now. One case it lost: mise treats that
+# update's exit 100 as fatal, so stale lists PLUS a broken third-party source
+# (a vendor repo a task added, since re-keyed) abort the packages step, where
+# this step's `|| warn` shrugged it off. A first install cannot hit it — vendor
+# repos arrive with the task tail, after packages; troubleshooting.md has the
+# by-hand fix for a re-run.
 
 info "Running mise bootstrap..."
 mise bootstrap "${YES[@]}"

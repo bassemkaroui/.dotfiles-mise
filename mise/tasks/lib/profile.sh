@@ -118,9 +118,10 @@ sudo_ok() {
 }
 
 # gh_curl <curl args...> — curl with a GitHub token attached when one is
-# available. install.sh exports a token for mise's own downloads, but a plain
-# curl never picks it up, and these tasks all hit api.github.com (60 req/hr
-# unauthenticated, shared with every other tool on the machine).
+# available. mise itself no longer needs one (≥ 2026.9.14 resolves GitHub
+# releases through mise-versions; install.sh only passes on a token it finds),
+# but these tasks curl api.github.com directly — 60 req/hr unauthenticated,
+# shared with every other tool on the machine.
 gh_curl() {
     local token="${MISE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
     if [[ -z "$token" ]] && command -v gh &>/dev/null; then

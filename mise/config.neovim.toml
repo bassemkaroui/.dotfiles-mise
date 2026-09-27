@@ -17,3 +17,11 @@ tree-sitter = "latest"
 
 [bootstrap.repos]
 "~/.config/nvim" = { url = "https://github.com/bassemkaroui/kickstart.nvim.git", ref = "custom_config" }
+
+# `mise doctor project` — see the health-checks section of config.toml.
+# The glibc floor above fails at parser-build time, deep inside nvim; this
+# surfaces it as one line.
+[doctor.checks.tree-sitter-runs]
+description = "the prebuilt tree-sitter runs on this glibc (nvim-treesitter builds parsers with it)"
+run = "tree-sitter --version >/dev/null"
+hint = "pin a lower-floor release in mise/config.neovim.toml, e.g. tree-sitter = \"0.25.10\" (glibc 2.34)"

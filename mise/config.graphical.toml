@@ -28,3 +28,9 @@
 # extension gets it syntax highlighting; `config` is empty but canonical.
 "~/.config/ghostty/config" = { mode = "symlink" }
 "~/.config/ghostty/config.ghostty" = { mode = "symlink" }
+
+# `mise doctor project` — see the health-checks section of config.toml.
+[doctor.checks.nerd-font]
+description = "the FiraCode Nerd Font powerlevel10k needs is visible to fontconfig"
+run = "fc-list | grep -q 'FiraCode Nerd Font'"
+hint = "mise run setup:fonts"

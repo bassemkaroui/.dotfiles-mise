@@ -1,7 +1,7 @@
 # .dotfiles-mise
 
 Declarative dotfiles + machine setup built on [mise bootstrap](https://mise.jdx.dev/bootstrap.html)
-(mise ≥ 2026.8.16). Successor to the Stow-based [.dotfiles](https://github.com/bassemkaroui/.dotfiles)
+(mise ≥ 2026.9.15). Successor to the Stow-based [.dotfiles](https://github.com/bassemkaroui/.dotfiles)
 repo — see [MIGRATION.md](MIGRATION.md) for the capability map and cutover checklist.
 
 Targets **Ubuntu 24.04+ / glibc ≥ 2.39**, Debian-family (Ubuntu/Pop!_OS/Mint). Packages
@@ -28,10 +28,13 @@ otherwise rather than half-deploy.
 
 `install.sh` does, in order:
 
-1. Installs mise if missing (`curl https://mise.run | sh`).
-2. Resolves a GitHub token (`$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` → `$GH_TOKEN` →
-   `gh auth token`) and exports it — required because installing `[tools]` hits the GitHub
-   releases API, which rate-limits unauthenticated callers to 60 req/hr.
+1. Installs mise if missing (`curl https://mise.run | sh`), and refuses an existing one older
+   than 2026.9.15 — older releases silently ignore parts of this config instead of failing.
+   It does not upgrade mise for you: `mise self-update`, then re-run.
+2. Passes on a GitHub token if one is at hand (`$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` →
+   `$GH_TOKEN` → `gh auth token`). None is needed: since mise 2026.9.14 GitHub release lookups
+   go through mise's own mirror, and a tokenless install of every tool here made about half a
+   dozen calls to the rate-limited GitHub API.
 3. Prepares `~/.config/mise` as a real directory (converting a legacy whole-dir symlink, or
    backing up a pre-existing global config).
 4. Seeds the per-machine `~/.config/mise/miserc.toml` (profile selection) — pass
@@ -80,8 +83,10 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `virt` | VirtualBox, Oracle's build + Vagrant. Skips when a distro-packaged `virtualbox` is present; dkms modules need kernel headers, and Secure Boot needs a MOK enrolment |
 | `laptop` / `desktop` | device markers consumed by template-mode dotfiles (no standalone config) |
 
-After editing profiles: `mise bootstrap --yes` (add) — removals leave files behind by design;
-run `mise run cleanup` to reap stale symlinks.
+`mise run setup:profiles` handles both directions: for an added profile it converges, for a
+removed one it previews and offers `mise bootstrap unapply <profile>`, which removes what that
+profile deployed (links, managed files, the empty directories mise made for them). Packages and
+tools it installed stay; the unapply output says how to prune packages.
 
 ## Everyday commands
 
@@ -94,6 +99,8 @@ mise bootstrap dotfiles add ~/.p10k.zsh    # recapture a file you edited/regener
 mise bootstrap dotfiles diff               # current vs desired, per entry
 mise bootstrap dotfiles unapply <target>   # remove one entry's files — BEFORE deleting the entry
 mise run setup:profiles          # add/remove this machine's profiles (space toggles; --list)
+mise bootstrap unapply <profile> # remove what a deselected profile deployed (--dry-run first)
+mise doctor project              # health checks declared in the config (plain `mise doctor` skips them)
 mise run setup:p10k-icon         # pick the prompt's OS icon (--show / --clear / --icon)
 mise run setup:hostname          # rename this machine, /etc/hosts too (--show / --name)
 mise bootstrap repos status      # cloned-repo drift
@@ -193,7 +200,9 @@ with template mode.
   something shared by every machine, edit `home/.gitconfig` and commit it. There is a
   warning banner at the top of that file spelling this out.
 - **Sensitive dirs are never whole-dir symlinks** (`~/.gnupg`, `~/.config/gh`, `~/.claude`,
-  `~/.ssh`) so live tokens/keys can't land in the repo tree.
+  `~/.ssh`) so live tokens/keys can't land in the repo tree. `~/.gnupg` and `~/.ssh` get their
+  0700 from permissions-only `[dotfiles]` entries, so a drifted mode shows in
+  `mise bootstrap status` and the next apply fixes it.
 - **No `[dotfiles]` source may point at something bootstrap creates.** An entry whose explicit
   source is missing aborts the *entire* apply, and the first-run pass applies dotfiles before
   cloning repos — so links into `~/.tmux` and `~/.local/opt/PathPicker` are made by the
@@ -210,8 +219,9 @@ with template mode.
   still exist they are not dangling, so `mise run cleanup` (which only reaps dangling links)
   cannot help either. Deleting a *source file* is fine: mise prunes the `symlink-each` link it
   left behind on the next apply.
-- **`mise dotfiles ...` is the deprecated spelling of `mise bootstrap dotfiles ...`.** It still
-  works, but `mise dotfiles --help` now says to use the longer form, and this repo does.
+- **This repo spells it `mise bootstrap dotfiles ...`.** `mise dotfiles` and `mise dot` are the
+  same commands — 2026.8.16 briefly deprecated the top-level form, 2026.9.8 restored it — but
+  one spelling everywhere keeps the docs greppable.
 - **Never run `mise bootstrap dotfiles apply --force` / `mise bootstrap --force-dotfiles`.** mise
   suggests it when it hits a conflict, but on the self-management entries it would overwrite
   the repo's own config files with symlink loops and silently drop the global config. Resolve

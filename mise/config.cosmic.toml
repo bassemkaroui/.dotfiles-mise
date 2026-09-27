@@ -52,3 +52,12 @@ KERNEL=="i2c-[0-9]*", GROUP="i2c", MODE="0660"
 owner = "root"
 group = "root"
 mode = "0644"
+
+# `mise doctor project` — see the health-checks section of config.toml.
+# The SESSION's groups (`id -nG`), not the group database: setup:cosmic adds the
+# membership, but ddcutil only gets it after the next login, and that
+# half-state is exactly what "brightness keys do nothing" looks like.
+[doctor.checks.i2c-membership]
+description = "this session is in the i2c group (ddcutil without root)"
+run = "id -nG | tr ' ' '\\n' | grep -qx i2c"
+hint = "mise run setup:cosmic, then log out and back in"

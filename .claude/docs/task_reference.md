@@ -53,7 +53,7 @@ so the list is unconditional.
 
 | # | Task | Owns |
 | --- | --- | --- |
-| 1 | `setup:custom-hookup` | clones/links the private companion repo, trusts the drop-in, removes it again if the live lint fails |
+| 1 | `setup:custom-hookup` | clones/links the private companion repo, trusts the drop-in, removes it again if the live lint fails, tightens `~/.ssh/*` template sources to 0600 (`~/.ssh` itself is a core permissions entry now) |
 | 2 | `setup:repo-links` | links into `[bootstrap.repos]` clones (oh-my-tmux's `tmux.conf`, `fpp`) — these cannot be `[dotfiles]` entries |
 | 3 | `setup:repo-remotes` | the *secondary* remotes a `[bootstrap.repos]` entry cannot declare — it records only `origin`, so the nvim config's `upstream` (kickstart) is added here (`neovim`) |
 | 4 | `update:tmux-local` | folds upstream oh-my-tmux template changes into our `tmux.conf.local`; a conflict parks a `.merged` preview instead of breaking anything |
@@ -93,11 +93,11 @@ active, so running it inside a converge would change the chain's own inputs midw
 
 | Task | Flags | Notes |
 | --- | --- | --- |
-| `cleanup` | `--dry-run --yes` | removes symlinks that are **both** dangling **and** into this repo. Does not undo a working deployment. Narrower than it used to be: mise now records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and prunes one itself when its source file is deleted, so this task covers what mise still won't — a removed profile's config link, a whole-dir link, a `conf.d` drop-in whose companion clone is gone, and anything orphaned by deleting a `[dotfiles]` entry without `unapply`ing it first (those links are not dangling, so it cannot see them either — see troubleshooting) |
+| `cleanup` | `--dry-run --yes` | removes symlinks that are **both** dangling **and** into this repo. Does not undo a working deployment — for a deselected profile that is `mise bootstrap unapply <profile>`. Slow on a real machine (67 s measured; it walks `~/.local/share`), which is why it is not a `[doctor.checks]` probe. Narrower than it used to be: mise now records `symlink-each` links under `$MISE_STATE_DIR/dotfiles` and prunes one itself when its source file is deleted, so this task covers what mise still won't — a removed profile's config link, a whole-dir link, a `conf.d` drop-in whose companion clone is gone, and anything orphaned by deleting a `[dotfiles]` entry without `unapply`ing it first (those links are not dangling, so it cannot see them either — see troubleshooting) |
 | `repo:lint` | `--fix` | everything CI runs. Required before any push |
 | `setup:hostname` | `--name <n> --show` | validates the label and keeps `/etc/hosts` in sync |
 | `setup:p10k-icon` | `--icon --show --clear --if-unanswered` | without the flag it always opens the picker; the flag is what makes the chained call once-only |
-| `setup:profiles` | `--list` | the interactive editor for `~/.config/mise/miserc.toml`. `install.sh`'s numbered picker only fires when that file does not yet exist; this is how profiles change on every run after the first. Reads the registry from `install.sh`'s `KNOWN_PROFILES` and the descriptions from `miserc.example.toml`, so a new profile needs no change here. Rewrites only the `env` line, leaving any other setting in the file intact, then offers `mise bootstrap --yes` and runs `cleanup` |
+| `setup:profiles` | `--list` | the interactive editor for `~/.config/mise/miserc.toml`. `install.sh`'s numbered picker only fires when that file does not yet exist; this is how profiles change on every run after the first. Reads the registry from `install.sh`'s `KNOWN_PROFILES` and the descriptions from `miserc.example.toml`, so a new profile needs no change here. Rewrites only the `env` line, leaving any other setting in the file intact. For removed profiles it previews `mise bootstrap unapply --dry-run <removed>` and offers to run it (never for the whole selection: unapply removes an env's resources even while it is selected); then offers `mise bootstrap --yes` and runs `cleanup`. `--no-converge` skips all three offers and prints the unapply command |
 | `setup:cosmic-theme` | | menu |
 | `setup:cosmic-theme-clean` | | deletes cached themes |
 | `setup:repo-remotes` | `--fetch` | also chained. A newly added remote is always fetched; `--fetch` re-fetches one that already existed. A remote pointing somewhere else is left alone with the `remote set-url` command to adopt this repo's URL |

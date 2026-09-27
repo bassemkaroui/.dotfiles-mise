@@ -124,14 +124,15 @@ else
     ok_changed "Linked $DROPIN → $SOURCE_CONF"
 fi
 
-# An UNTRUSTED conf.d drop-in is SILENTLY IGNORED — verified 2026-07-21: with it
-# in place, `mise bootstrap dotfiles status` exits 0, mentions no trust problem,
-# and the entries simply do not exist. (That is gentler than the error mise
-# raises for the global config, and far more dangerous here: the companion would
-# appear to be wired up and deploy nothing, so setup:git-signing — the very next
-# chain step — would find no ~/.gitconfig.local.example and no-op forever.)
-# install.sh trusts every conf.d file in its own step 6; this task runs at
-# bootstrap step 12, long after that loop, so it must do its own.
+# Belt and braces. On 2026.7.x an UNTRUSTED conf.d drop-in was SILENTLY IGNORED
+# (verified 2026-07-21: status exit 0, no trust message, entries absent) — the
+# companion would look wired up and deploy nothing, and setup:git-signing, the
+# very next chain step, would no-op forever. Re-verified on 2026.9.15 it is not:
+# a never-trusted drop-in in the global conf.d loads in full ([dotfiles], [env]
+# templates, [tasks]) with `mise trust --show` listing nothing, and only an
+# explicit `mise trust --ignore` hides it. The call stays because it costs
+# nothing and the old behaviour cost a whole companion. install.sh trusts every
+# conf.d file in its step 6; this task runs long after that loop.
 mise trust "$DROPIN" >/dev/null 2>&1 || warn "Could not \`mise trust\` $DROPIN"
 
 # ─── Validate BEFORE applying ─────────────────────────────────────────────────
@@ -222,6 +223,11 @@ try:
 except json.JSONDecodeError:
     sys.exit(0)
 for f in data.get("files", []):
+    # A permissions-only entry reports a drifted mode as `differs`, but mise
+    # only chmods it, and its target is a directory: backing up the core
+    # "~/.ssh" entry would move ~/.ssh, keys included, out of the way.
+    if f.get("mode") == "permissions":
+        continue
     if f.get("state") == "differs":
         print(f["target"])
 ' \
@@ -259,13 +265,18 @@ fi
 # every apply rewrites the mode back. CI caught exactly that loop — and then
 # caught it a second time when the chmod ran AFTER the apply: the target kept
 # the clone's 0664 while the source became 0600, which is the same mismatch with
-# the operands swapped. It has to happen BEFORE mise renders anything. mkdir
-# before chmod: in the bootstrap chain the pre-dotfiles hook already made ~/.ssh
-# 0700, but this task is reachable standalone (see the header), where at umask
-# 002 a chmod of a missing dir no-ops and `mise bootstrap dotfiles apply` then
-# creates ~/.ssh at 0775 — group-writable, which ssh rejects.
-mkdir -p "$HOME/.ssh" 2>/dev/null || true
-chmod 700 "$HOME/.ssh" 2>/dev/null || true
+# the operands swapped. It has to happen BEFORE mise renders anything.
+#
+# A companion entry that declares `permissions = "0600"` (mise ≥ 2026.9.13)
+# needs none of this: mise then gives the rendered file that mode whatever the
+# source's, and status compares against the declared value (measured: a 0664
+# source rendered to 0600, and a second apply was a no-op). The tightening stays
+# for companions that don't declare it, and is harmless for ones that do.
+#
+# ~/.ssh itself is no longer this task's job. The core `"~/.ssh" = { permissions
+# = "0700" }` entry sets it in the same apply that creates it — including when
+# the directory is created by THIS companion's ~/.ssh/config entry, from a
+# different config file (measured on 2026.9.14).
 if have python3 && [[ -f "$REPO/scripts/dotfiles-targets.py" ]]; then
     while IFS=$'\t' read -r target source; do
         # shellcheck disable=SC2088  # a literal "~/" prefix as mise writes it in config, not a path to expand

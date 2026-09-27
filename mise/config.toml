@@ -50,8 +50,9 @@ hunk = "latest"
 # tuicr — the same review-first TUI niche as hunk, kept alongside it rather than
 # instead of it: vim keybindings, and a `:submit` that pushes an inline review
 # to GitHub/GitLab/Gitea/Bitbucket, which hunk does not do. No registry short
-# name on 2026.8.16 (`mise registry | grep tuicr` is empty), so the backend is
-# spelled out — which is also what upstream's own install docs tell you to write.
+# name on 2026.8.16 or 2026.9.15 (`mise registry | grep tuicr` is empty), so
+# the backend is spelled out — which is also what upstream's own install docs
+# tell you to write.
 "github:agavra/tuicr" = "latest"
 # Encrypted peer-to-peer file transfer.
 croc = "latest"
@@ -106,44 +107,23 @@ jq = "latest"
 # PathPicker (fpp); the ~/.local/bin/fpp symlink is created by setup:repo-links
 "~/.local/opt/PathPicker" = { url = "https://github.com/facebook/PathPicker.git" }
 
-# ── System directories ────────────────────────────────────────────────────────
-# Declared so `mise bootstrap status` / `mise bootstrap plan` REPORT a drifted
-# mode, which a hook can never do — it can only repair one silently.
-#
-# These do NOT replace the pre-dotfiles hook below, they double it. Measured on
-# 2026.8.16 from a deliberately-wrong 0755: the files step (bootstrap step 3)
-# converges these to 0700 under a full `mise bootstrap`, under `--only
-# files,dotfiles`, and under `mise bootstrap files apply` — but it is SKIPPED by
-# `mise bootstrap --only dotfiles` (install.sh's link-only first pass, and
-# sandbox/mkhome.sh's) and by a standalone `mise bootstrap dotfiles apply`, both
-# of which ended at 0755 while still running the hook. The hook covers those two
-# paths; these entries cover reporting.
-#
-# 0700 is therefore stated twice, here and in the hook. Change both together.
-[bootstrap.directories."~/.gnupg"]
-mode = "0700"
-
-[bootstrap.directories."~/.ssh"]
-mode = "0700"
-
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 # $MISE_ENV is NOT visible to hooks (verified), so everything here must be
 # unconditional and safe on every machine — anything profile-dependent belongs
 # in a task. Hooks also run in the caller's environment, hence `mise exec --`
 # for anything that needs a [tools] binary on PATH.
 [bootstrap.hooks]
-# gpg refuses to use a ~/.gnupg it considers unsafe, and mise would otherwise
-# create it with the process umask when applying ~/.gnupg/gpg-agent.conf.
-# Creating it 0700 first is idempotent; applying does not touch the mode after.
-# ~/.ssh gets the same treatment ahead of the companion repo's ~/.ssh/config
-# entry: ssh refuses a group/world-writable directory, and mise would create it
-# at the process umask (0775 observed at umask 002).
-#
-# [bootstrap.directories] above declares the same two directories, for the sake
-# of `bootstrap status`/`plan`. This hook stays because the step that applies
-# those declarations does not run in every path that applies dotfiles — see the
-# measurements there.
-pre-dotfiles = "mkdir -p ~/.gnupg ~/.ssh && chmod 700 ~/.gnupg ~/.ssh"
+# Existence only — the MODE of ~/.ssh and ~/.gnupg is owned by the two
+# permissions entries at the end of [dotfiles]. Those manage a directory that
+# exists and never create one, so without this a machine with no ~/.ssh (CI, a
+# fresh box before its first key) would print `~/.ssh does not exist;
+# permissions not set` on every apply. `-m 700` so the directory is never
+# briefly group-writable between this hook and the apply that follows; mkdir
+# leaves an existing directory's mode alone, so this does not repair drift —
+# the dotfiles entry does, and `mise bootstrap status` reports it.
+# ~/.gnupg needs no line here: the core ~/.gnupg/gpg-agent.conf entry creates it
+# in the same apply that sets its mode.
+pre-dotfiles = "mkdir -p -m 700 ~/.ssh"
 
 [bootstrap.hooks.post-tools]
 run = [
@@ -153,6 +133,67 @@ run = [
     # Register the tokyonight theme deployed above into bat's cache.
     "mise exec -- sh -c 'command -v bat >/dev/null 2>&1 && bat cache --build >/dev/null || true'",
 ]
+
+# ── Health checks: `mise doctor project` ──────────────────────────────────────
+# mise ≥ 2026.9.6 runs [doctor.checks.*] from the GLOBAL config too, from any
+# cwd (measured on 2026.9.14), with installed tools on PATH; it exits 1 when any
+# check fails. Plain `mise doctor` does NOT run them. Each one is a failure mode
+# from .claude/docs/troubleshooting.md that mise itself is quiet about, turned
+# into a probe. Profile-specific checks live in their profile's file, so they
+# only run where that profile is selected. Read-only, all of them: a check that
+# repairs would be a task.
+[doctor.checks.mise-version]
+description = "mise is at least 2026.9.15, the release this config is written against"
+# Older releases IGNORE the permissions entries below (unknown key → a sourceless
+# entry whose source is missing → silently dropped) and lack `bootstrap unapply`.
+run = '''
+have="$(mise --version | cut -d' ' -f1)"
+[ "$(printf '%s\n' 2026.9.15 "$have" | sort -V | head -n1)" = 2026.9.15 ]
+'''
+hint = "mise self-update"
+
+[doctor.checks.gitconfig]
+description = "git can read ~/.gitconfig (a corrupt one aborts every dotfiles apply)"
+run = "git config --global --list >/dev/null"
+hint = "GIT_CONFIG_GLOBAL=/dev/null git -C ~/.dotfiles-mise checkout -- home/.gitconfig && mise bootstrap dotfiles apply"
+
+[doctor.checks.repo-worktree]
+description = "~/.dotfiles-mise is a git work tree (manifest = \"git\" entries run git ls-files in it)"
+run = "git -C ~/.dotfiles-mise rev-parse --is-inside-work-tree >/dev/null"
+hint = "re-clone it: git clone https://github.com/bassemkaroui/.dotfiles-mise.git ~/.dotfiles-mise"
+
+[doctor.checks.dotfiles]
+description = "every [dotfiles] entry is applied, the ~/.ssh and ~/.gnupg modes included"
+run = "mise bootstrap dotfiles status --missing >/dev/null 2>&1"
+hint = "mise bootstrap dotfiles diff shows what differs; mise bootstrap dotfiles apply fixes it (never --force)"
+timeout = "60s"
+
+# No stale-links check, deliberately: `mise run cleanup --dry-run` took 67s of
+# full CPU on a real machine (it walks ~/.local/share, where mise's installs
+# live) and blew any sane timeout, and a cheaper copy of its scan would drift
+# from the task. Run it by hand.
+
+[doctor.checks.repos-clean]
+description = "no [bootstrap.repos] clone has local changes (one aborts the whole bootstrap)"
+run = '''
+mise bootstrap repos status --json 2>/dev/null | python3 -c '
+import json, sys
+repos = json.load(sys.stdin).get("repos", [])
+dirty = [r.get("path") for r in repos if r.get("state") == "dirty"]
+print("\n".join(dirty), file=sys.stderr)
+sys.exit(1 if dirty else 0)
+'
+'''
+hint = "generated files: printf '<name>\\n' >> <clone>/.git/info/exclude — anything else: commit or stash it"
+timeout = "30s"
+
+[doctor.checks.login-shell]
+description = "the login shell is zsh, or ~/.bash_profile execs it (setup:login-shell-fallback)"
+run = '''
+getent passwd "$(id -un)" | cut -d: -f7 | grep -q 'zsh$' \
+    || grep -q 'exec zsh -l' ~/.bash_profile 2>/dev/null
+'''
+hint = "mise run setup:login-shell-fallback"
 
 # ── Imperative tail ───────────────────────────────────────────────────────────
 # Runs after packages/repos/dotfiles/user/tools. Steps run in order, each is
@@ -346,6 +387,27 @@ run = [
 
 # GPG. Only the agent config — keyrings stay out of the repo. mise creates
 # missing parent dirs with the process umask (0755/0775 observed), and gpg
-# refuses to use a group/world-readable ~/.gnupg, so the pre-dotfiles hook
-# below creates it 0700 first.
+# refuses to use a group/world-readable ~/.gnupg; the permissions entry below
+# fixes the mode in the same apply that creates the directory.
 "~/.gnupg/gpg-agent.conf" = { mode = "symlink" }
+
+# ── Directory modes (mise ≥ 2026.9.13 `permissions`) ──────────────────────────
+# gpg refuses a ~/.gnupg others can read; ssh refuses a group/world-writable
+# ~/.ssh (the companion repo's ~/.ssh/config lands in it). Permissions-only
+# entries: no source, no content, never created — mise only chmods what exists.
+#
+# These replaced a chmod hook AND a [bootstrap.directories] pair that doubled
+# it, because neither alone covered every path. Measured on 2026.8.16: the
+# files step that applies [bootstrap.directories] is skipped by `mise bootstrap
+# --only dotfiles` (install.sh's first pass, sandbox/mkhome.sh) and by a
+# standalone `mise bootstrap dotfiles apply`, and the hook could only repair
+# drift silently. These run in every one of those paths (measured on 2026.9.14),
+# and drift shows in `mise bootstrap status` / `dotfiles status` as `differs
+# (permissions differ)` — which makes `dotfiles status --missing` exit 1.
+# `mise bootstrap plan` does NOT cover [dotfiles]; it never did.
+#
+# `differs` is also the state install.sh and setup:custom-hookup back up by
+# moving the target aside. Both skip `mode: "permissions"` entries — without
+# that, a drifted ~/.ssh would be moved to ~/.ssh.pre-mise.bak, keys included.
+"~/.gnupg" = { permissions = "0700" }
+"~/.ssh" = { permissions = "0700" }

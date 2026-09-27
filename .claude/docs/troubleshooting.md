@@ -130,16 +130,18 @@ mise run cleanup --dry-run
 
 ### A `conf.d/` drop-in has no effect
 
-An **untrusted** drop-in is *silently ignored* — not an error. `mise bootstrap dotfiles status`
-exits 0, says nothing about trust, and the entries simply do not exist.
+On mise 2026.7.x an **untrusted** drop-in was *silently ignored* — status exit 0, no trust
+message, entries simply absent. On 2026.9.15 a never-trusted drop-in in the global `conf.d`
+loads in full, so trust is no longer the likely cause — unless it was explicitly **ignored**
+(`mise trust --ignore`), which hides it the same silent way:
 
 ```bash
-mise trust ~/.config/mise/conf.d/50-custom.toml
+mise config ls                                   # is it listed at all?
+mise trust ~/.config/mise/conf.d/50-custom.toml  # un-ignore / trust it
 ```
 
-Note the asymmetry: an untrusted *global* config is a hard error, but a drop-in just vanishes.
-`setup:custom-hookup` trusts its own drop-in because it creates it long after `install.sh`'s
-trust loop has run.
+Otherwise check the link resolves (`ls -lL`) and that `lint-config.py --live` passes —
+`setup:custom-hookup` removes the link when it does not.
 
 ### A `[dotfiles]` entry never deploys and nothing complains
 
@@ -150,8 +152,18 @@ precisely because mise won't.
 
 ### Deselecting a profile left its files behind
 
-There are no removal semantics, and `cleanup` won't help — the sources still exist, so the links
-aren't dangling. This is a manual delete.
+`cleanup` won't help — the sources still exist, so the links aren't dangling. mise ≥ 2026.9.13
+can remove them, because the profile's config file is still on disk and linked:
+
+```bash
+mise bootstrap unapply --dry-run <profile>   # the exact rm/rmdir list
+mise bootstrap unapply <profile>
+```
+
+`setup:profiles` offers this for the profiles you remove. Pass only profiles that are **no longer
+selected** — unapply removes an env's resources even while the env is active (the next bootstrap
+puts them back). Targets changed since they were applied are kept unless you add `--force`;
+packages and tools are out of scope (the output says how to prune packages).
 
 ### An entry was deleted from the config and its files are still there
 
@@ -206,19 +218,31 @@ To recover: `git -C ~/.dotfiles-mise checkout home/.gitconfig`.
 
 ### `E: Unable to locate package nala` / `has no installation candidate`
 
-apt's package lists are stale or incomplete, and mise only refreshes them when there are none at
-all — a fresh container, not a freshly installed desktop (behaviour #37). All apt entries go
-through one `apt-get install`, so one miss stops the bootstrap at the packages step, before
-clones, dotfiles, tools and the task chain.
-
-`install.sh` refreshes the lists itself whenever an apt entry is still missing. On a bare
-`mise bootstrap` (after adding a profile, say):
+apt's package lists are stale or incomplete. Up to 2026.9.14 mise refreshed them only when
+there were none at all, and a freshly installed desktop's stale ones failed the whole packages
+step (behaviour #37). **2026.9.15 fixed it**: mise simulates the install first and runs
+`apt-get update` once if the simulation fails — measured in a container with the universe lists
+deleted. `install.sh` requires 9.15, so on this repo the error now means the package really is
+unavailable (a typo, a repo that is not configured, a release that dropped it) — or an older
+mise on `PATH`:
 
 ```bash
-sudo apt-get update && mise bootstrap --yes
+mise --version            # ≥ 2026.9.15? `mise doctor project` checks this too
+apt-cache policy <pkg>    # is there a candidate at all?
 ```
 
-Not `mise bootstrap --update`: besides the lists, it pulls every unpinned clone.
+One case 9.15 does not cover: stale lists **plus** a broken third-party source (a vendor repo a
+task added, since moved or re-keyed). mise's own refresh then fails on that source —
+`apt-get exited with non-zero status: exit code 100` after `Failed to fetch …` — and it aborts.
+apt itself refreshes the healthy sources regardless, so:
+
+```bash
+sudo apt-get update; mise bootstrap --yes     # `;`, not `&&`: update exits 100 here
+```
+
+and fix or remove the broken `/etc/apt/sources.list.d/` file (behaviour #37).
+
+Not `mise bootstrap --update` as a fix: besides the lists, it pulls every unpinned clone.
 
 ### Cloning dies with `RPC failed; curl 56 GnuTLS recv error (-24)`
 
@@ -235,14 +259,20 @@ git -c http.version=HTTP/1.1 clone ...
 
 ### `mise install` is rate-limited or crawling
 
-Unauthenticated GitHub API callers get 60 requests/hour, shared with every other tool on the
-machine. Set `GITHUB_TOKEN` / `MISE_GITHUB_TOKEN`, or authenticate `gh`; `install.sh` resolves a
-token from `$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` → `$GH_TOKEN` → `gh auth token`.
+Unlikely since 2026.9.14: version, release and attestation lookups for `github:`/`aqua:` tools go
+through mise-versions.jdx.dev, not api.github.com. Measured with no token anywhere, every tool
+this repo declares resolved with 4 GitHub API requests (neofetch and resvg fall back to it), and
+installing the non-registry set added 2 — against the 60/hour unauthenticated budget. What
+still hits the API directly: private repos, a mise-versions failure other than a 404, and this
+repo's own tasks that `curl` GitHub (`gh_curl` in `lib/profile.sh` — fonts, ghostty, obsidian,
+veracrypt, zen). For those, export `GITHUB_TOKEN` / `MISE_GITHUB_TOKEN` or log `gh` in;
+`install.sh` passes on the first of `$MISE_GITHUB_TOKEN` → `$GITHUB_TOKEN` → `$GH_TOKEN` →
+`gh auth token` it finds.
 
 Do **not** try to `mise exec`-install `gh` to get one: `mise exec TOOL@latest` is a "fast command"
-hard-capped at 3 seconds regardless of `MISE_FETCH_REMOTE_VERSIONS_TIMEOUT`, and it needs the very
-API that is failing. Also, `mise settings get <key>` echoes the raw env value unchanged — it never
-confirms a value parses or applies, so don't use it as verification.
+hard-capped at 3 seconds regardless of `MISE_FETCH_REMOTE_VERSIONS_TIMEOUT`. Also, `mise settings
+get <key>` echoes the raw env value unchanged — it never confirms a value parses or applies, so
+don't use it as verification.
 
 ### `version 'GLIBC_2.39' not found` building treesitter parsers
 
@@ -258,9 +288,29 @@ Measured floors: `0.26.11 = 2.39`, `0.25.10 = 2.34`, `0.24.7 = 2.29`.
 
 ### `install.sh` refuses to run
 
-It checks three things and refuses rather than half-deploy: the clone must be at
-`~/.dotfiles-mise`, `~/.config` must be the default, and no `[dotfiles]` target or repo path may
+It checks four things and refuses rather than half-deploy: the clone must be at
+`~/.dotfiles-mise`, `~/.config` must be the default, an existing mise must be ≥ 2026.9.15 (older
+releases silently drop the `permissions` entries and `[doctor.checks]` rather than failing — it
+does not upgrade mise for you: `mise self-update`), and no `[dotfiles]` target or repo path may
 still resolve into an old stow deployment. The messages name the offending path.
+
+### `~/.ssh` or `~/.gnupg` has the wrong mode
+
+They are permissions-only `[dotfiles]` entries (0700), so drift shows as `differs (permissions
+differ)` in `mise bootstrap status` and `mise bootstrap dotfiles status`, and `mise bootstrap
+dotfiles apply` fixes it. `mise bootstrap plan` does **not** show it — it does not cover
+`[dotfiles]` at all. A `WARN ... ~/.ssh does not exist; permissions not set` means exactly that
+and is harmless; the `pre-dotfiles` hook creates `~/.ssh` on every bootstrap to keep it quiet.
+
+If you add another backup or cleanup pass keyed on `differs`, skip `mode: "permissions"` — a
+permissions entry's target is a whole directory, and moving it aside moves your keys.
+
+### `mise doctor project` reports a FAIL
+
+Each check's hint line is the fix. They are the `[doctor.checks]` in `mise/config.toml` (plus
+`nerd-font`, `i2c-membership` and `tree-sitter-runs` from the graphical, cosmic and neovim
+profile files), each one a failure mode from this page. `i2c-membership` checks the *session's*
+groups, so it keeps failing after `setup:cosmic` until you log out and back in.
 
 ---
 
@@ -313,6 +363,7 @@ mise bootstrap repos status            # clone drift and dirty clones
 mise config ls                         # which config files actually loaded
 mise trust --show                      # what is trusted
 mise doctor                            # dirs, settings and their source files
+mise doctor project                    # this repo's [doctor.checks] — the probes plain doctor skips
 mise tasks                             # every task and its description
 mise run cleanup --dry-run         # dangling links into this repo
 python3 scripts/lint-config.py --live   # collisions against the machine's conf.d

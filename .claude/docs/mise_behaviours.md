@@ -738,3 +738,20 @@ Measured on 2026.9.15, in `/tmp` sandboxes and then on the real machine, while m
 Consequences: the companion carries the laptop's datadir as a conditional `[env]` (CUSTOM.md,
 *Device variants*), and `install:nextcloud-aio` unsets an empty `NEXTCLOUD_DATADIR` before calling
 Compose. Any other consumer of a conditional `[env]` has to treat empty as absent the same way.
+
+### 48. One source, several targets: explicit absolute sources back into this repo work (2026.9.15)
+
+Measured for the `claude2` profile in a two-pass sandbox and then on a real machine: eight
+`~/.claude-2/*` entries with `source = "~/.dotfiles-mise/home/.claude/..."`, five `symlink` and
+three `symlink-each` with `manifest = "git"`, deploy alongside core's sourceless `~/.claude/*`
+entries for the same files. A second apply is a no-op; `mise bootstrap unapply claude2` removes
+exactly the eight (and the emptied `~/.claude-2`), leaving `~/.claude` untouched. Two things to
+know:
+
+- **A new profile file takes two applies to land.** The self-management glob
+  (`~/.config/mise/config*.toml`) is expanded when the config loads, so the first apply after
+  adding `config.<p>.toml` only links the file into `~/.config/mise/`; the profile's own entries
+  deploy on the next one. In `--two-pass` sandbox mode the first pass never sees a profile at all,
+  so its entries show as `missing` in the status that follows — that is the harness, not a bug.
+- `lint-config.py` accepts the sources because they start with `~/.dotfiles-mise/` and resolve
+  inside the checkout; any other absolute path outside the repo is an `OUT-OF-REPO SOURCE` error.

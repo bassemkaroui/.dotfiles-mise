@@ -70,6 +70,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `gnome` | GNOME Shell extensions + `dconf` (implies `graphical`). The two vendored GTK themes were dropped when this repo went public — install them from upstream |
 | `cosmic` | ddcutil/i2c udev rule, group and membership; theme picker via `mise run setup:cosmic-theme` (implies `graphical`) |
 | `ai` | claude + sandbox-runtime |
+| `claude2` | a second Claude Code config directory, `~/.claude-2`, linked to the same `home/.claude/` sources as `~/.claude` — one place to edit settings, commands, skills and agents; two logins. Run the second account with `claude2` (a `.zshrc` wrapper for `CLAUDE_CONFIG_DIR=~/.claude-2 claude`). Credentials, history and per-account synced skills stay separate |
 | `dev` | uv, corepack, pre-commit, doppler |
 | `yazi` | yazi + rich preview stack |
 | `neovim` | neovim + tree-sitter + personal nvim config |

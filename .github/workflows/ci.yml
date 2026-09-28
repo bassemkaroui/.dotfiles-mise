@@ -52,7 +52,7 @@ jobs:
       matrix:
         profiles:
           - ""
-          - "ai,dev,yazi,neovim,media,latex"
+          - "ai,claude2,dev,yazi,neovim,media,latex"
           - "graphical,gnome,laptop"
           - "graphical,cosmic,desktop"
           - "veracrypt,nextcloud"
@@ -136,6 +136,12 @@ jobs:
           case "${{ matrix.profiles }}" in
             *yazi*) assert_count yazi '~/\.config/yazi' 1 ;;
             *)      assert_count yazi '~/\.config/yazi' 0 ;;
+          esac
+          # claude2 mirrors core's eight ~/.claude entries onto ~/.claude-2 with
+          # explicit sources; the count pins the two sets to the same size.
+          case "${{ matrix.profiles }}" in
+            *claude2*) assert_count claude2 '~/\.claude-2/' 8 ;;
+            *)         assert_count claude2 '~/\.claude-2/' 0 ;;
           esac
           # Core entries must be present on every arm, including the empty one.
           assert_count core-zshrc '~/\.zshrc' 1

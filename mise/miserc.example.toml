@@ -8,6 +8,7 @@
 #   gnome      GNOME Shell extensions + dconf              (implies: graphical)
 #   cosmic     ddcutil/i2c setup (theme: run setup:cosmic-theme)  (implies: graphical)
 #   ai         claude, sandbox-runtime
+#   claude2    a second Claude Code config dir, ~/.claude-2, sharing home/.claude (second subscription)
 #   dev        uv, corepack, pre-commit, doppler
 #   yazi       yazi + preview stack (glow, hexyl, duckdb)
 #   neovim     neovim, tree-sitter-cli, personal nvim config

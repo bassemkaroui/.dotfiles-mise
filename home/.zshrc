@@ -190,6 +190,14 @@ if (( $+commands[nvim] )); then
     unset _python3_path
 fi
 
+# ── Claude Code, second account ──
+# The claude2 profile deploys ~/.claude-2 as a second CLAUDE_CONFIG_DIR sharing
+# home/.claude's config. Guarded on the directory, not the profile: a machine
+# without it never sees the function.
+if [[ -d ~/.claude-2 ]]; then
+    claude2() { CLAUDE_CONFIG_DIR=~/.claude-2 command claude "$@"; }
+fi
+
 # ── UV completions ──
 (( $+commands[uv] ))  && _zsh_lazy_completion uv  'uv generate-shell-completion zsh'
 (( $+commands[uvx] )) && _zsh_lazy_completion uvx 'uvx --generate-shell-completion zsh'

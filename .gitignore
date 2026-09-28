@@ -7,6 +7,9 @@
 /mise/config.local.toml
 /mise/config.*.local.toml
 /mise/conf.d/
+# mise's project-level local override, at any depth (this repo's mise/ dir is
+# auto-discovered as a project config, mise_behaviours.md 4).
+mise.local.toml
 
 # ── Vendored upstream docs (refresh with docs/fetch.sh) ──
 /docs/upstream/

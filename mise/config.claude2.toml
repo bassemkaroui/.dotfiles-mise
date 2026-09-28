@@ -1,0 +1,35 @@
+# Profile: claude2 — a second Claude Code config directory, ~/.claude-2, for
+# running a second subscription side by side:
+#
+#   CLAUDE_CONFIG_DIR=~/.claude-2 claude     (home/.zshrc wraps this as `claude2`)
+#
+# ONE source, TWO targets. Every entry below links the same home/.claude/ file
+# that core's ~/.claude/* entries link, so a change to settings.json, a new
+# command, skill or agent reaches both directories on the next apply — there is
+# nothing to keep in sync. Sourceless entries can't do this (they mirror the
+# target's own path under dotfiles.root, which would be home/.claude-2/), hence
+# the explicit sources. Absolute, because a relative `source` resolves against
+# ~/.config/mise/ (mise_behaviours.md 11; the lint rejects it anyway), and
+# `~/.dotfiles-mise` is the path install.sh already pins the clone to.
+#
+# Same shape as core, for the same reasons: per-file, never a whole-dir link
+# (~/.claude-2 grows its own .credentials.json, history and projects/ — that
+# per-account state is exactly what must NOT be shared) and symlink-each with
+# manifest = "git" for the three directories (see the ~/.claude/commands
+# comment in config.toml). Claude Code installs the marketplace plugins named
+# in settings.json's enabledPlugins into ~/.claude-2/plugins/ by itself on
+# first launch; the account-synced skills/ and plugins/ `synced` trees are
+# per-login and stay unmanaged, as they do under ~/.claude.
+#
+# Deselecting the profile: `mise bootstrap unapply claude2` removes the links
+# (setup:profiles offers it). ~/.claude-2 itself stays, credentials and all —
+# delete it by hand when the second account goes away.
+[dotfiles]
+"~/.claude-2/settings.json" = { source = "~/.dotfiles-mise/home/.claude/settings.json", mode = "symlink" }
+"~/.claude-2/keybindings.json" = { source = "~/.dotfiles-mise/home/.claude/keybindings.json", mode = "symlink" }
+"~/.claude-2/CLAUDE.md" = { source = "~/.dotfiles-mise/home/.claude/CLAUDE.md", mode = "symlink" }
+"~/.claude-2/statusline-command.sh" = { source = "~/.dotfiles-mise/home/.claude/statusline-command.sh", mode = "symlink" }
+"~/.claude-2/.editorconfig" = { source = "~/.dotfiles-mise/home/.claude/.editorconfig", mode = "symlink" }
+"~/.claude-2/commands" = { source = "~/.dotfiles-mise/home/.claude/commands", mode = "symlink-each", manifest = "git" }
+"~/.claude-2/skills" = { source = "~/.dotfiles-mise/home/.claude/skills", mode = "symlink-each", manifest = "git" }
+"~/.claude-2/agents" = { source = "~/.dotfiles-mise/home/.claude/agents", mode = "symlink-each", manifest = "git" }

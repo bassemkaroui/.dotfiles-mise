@@ -206,14 +206,21 @@ fresh machine's first bootstrap at step 7, before Docker exists (behaviour 45), 
 | `copy` | files a tool rewrites in place | replaces |
 | `template` | per-machine variants | **destroys a pre-existing real file, silently** |
 
-The four `symlink-each` entries (`~/.claude/{commands,skills,agents}`,
-`~/.git-template/hooks`) add `manifest = "git"`: mise walks `git ls-files` in the source instead
+The seven `symlink-each` entries (`~/.claude/{commands,skills,agents}`, their `~/.claude-2`
+twins from the `claude2` profile, `~/.git-template/hooks`) add `manifest = "git"`: mise walks `git ls-files` in the source instead
 of the filesystem, so the repo's index — and behind it `.gitignore` — decides what deploys.
 Untracked files under `home/.claude/` are then neither committed nor deployed, which is the
 `/home/.claude/*` ignore block's defense-in-depth applied to the deploy side, and the `.gitkeep`
 in each empty directory is what keeps the source directory existing at all. The price is that
 `git ls-files` becomes a hard dependency of the **whole** apply: no `.git`, or a `~/.gitconfig`
 git refuses to parse, and nothing deploys — see behaviour #34 and troubleshooting.
+
+One source can feed several targets. A sourceless entry mirrors its *own* target path under
+`dotfiles.root`, so a second deployment of the same file needs an explicit `source` — absolute,
+`~/.dotfiles-mise/home/...`, because a relative one resolves against `~/.config/mise/` (behaviour
+#11). The `claude2` profile is the pattern in use: eight `~/.claude-2/*` entries pointing at the
+same `home/.claude/` files core links into `~/.claude`, so one edit reaches both Claude Code
+config directories and `mise bootstrap unapply claude2` removes the second set alone.
 
 Template mode is the single most dangerous thing in the repo: it replaces the target with no error
 and no backup. `install.sh` moves conflicting real targets aside to `<file>.pre-mise.bak` before

@@ -178,6 +178,23 @@ core `config.toml` may declare a privileged resource** — the exposure stays in
 the recovery is `mise bootstrap --skip accounts,files`. The membership (`usermod -aG`) stays in the
 task regardless: `[bootstrap.users]` needs a literal user name, which a public repo does not have.
 
+### A service whose settings live in its own interface: record and check
+
+Nextcloud AIO (the `nextcloud` profile) fits neither column. Its settings live in its web
+interface and in a `configuration.json` it shares with secrets it generates, and upstream
+documents no file or variable for them. The pattern used instead:
+
+- the **launch** config is a file: `services/nextcloud-aio/compose.yaml`;
+- a **task** creates the container when absent and starts it when stopped, and otherwise stays out
+  of the way (AIO updates and recreates it itself);
+- the **interface** settings are recorded in `services/nextcloud-aio/settings.toml`, printed as a
+  checklist until setup is done, and compared read-only by `[doctor.checks]`.
+
+The declarative alternatives were measured and rejected: a `[bootstrap.compose]` project kills a
+fresh machine's first bootstrap at step 7, before Docker exists (behaviour 45), and a
+`[bootstrap.secrets]` input makes every full bootstrap fail while its variable is unset
+(behaviour 46).
+
 ---
 
 ## 6. Deployment modes, and the dangerous one

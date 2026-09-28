@@ -7,7 +7,8 @@ to do it in.
 
 Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
 (entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14. Re-verified against
-**2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new. The repo now
+**2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new; 45 and 46 (the compose
+and secrets resources, measured for the `nextcloud` profile) were added on 2026-09-28. The repo now
 requires 2026.9.15 (`install.sh` refuses older).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
@@ -666,3 +667,47 @@ config is edited. A task loses one app and `skip`s. Also out of reach declarativ
 per-distro codename (`UBUNTU_CODENAME` over `VERSION_CODENAME`, for Mint), and `--no-remove` —
 mise runs a plain `apt-get install -y -- <pkgs>`, so `docker-ce`'s `Conflicts: docker.io` would
 silently remove a hand-installed `docker.io`. Vendor apps stay tasks (`lib/apt_repo.sh`).
+
+### 45. `[bootstrap.compose]` fails closed when Docker is missing — at step 7, before dotfiles
+
+Measured on 2026.9.14 and again on 2026.9.15, in `/tmp` sandboxes with a PATH that has no
+`docker`, one compose project and one `[dotfiles]` entry as a marker:
+
+| command | result |
+| --- | --- |
+| `bootstrap plan --detailed-exitcode` | `unknown compose:nc … unavailable: neither 'docker compose' nor 'docker-compose' was found`, rc **1** |
+| `bootstrap --yes --only compose,dotfiles` | `refusing unsafe change to bootstrap compose project 'nc'`, rc 1, marker **not** deployed |
+| `bootstrap --yes --skip tools,task` | same error, rc 1, marker **not** deployed |
+
+Compose projects converge at step 7 of 18; `[dotfiles]` is step 9, tools 15 and `[tasks.bootstrap]`
+17. This repo installs Docker at step 17 (`install:docker`, and entry 44 keeps it there), so a
+compose project in any profile would kill the **first bootstrap of every fresh machine** with that
+profile, before the task that would install Docker. `depends_on` only names bootstrap resources
+(`package:…`, `service:…`), not tasks. The `unknown` state also makes CI's `plan` step exit 1 on any
+sandbox arm without Docker.
+
+Two more reasons it does not fit Nextcloud AIO in particular: AIO labels the sibling containers it
+creates into the same compose project (verified on a real deploy, 2026-09-28:
+`com.docker.compose.project=nextcloud-aio` on `nextcloud-aio-domaincheck`), and `remove_orphans`
+**defaults to true** — it would delete them; and AIO recreates its own mastercontainer on update,
+so a declarative owner would fight it. `install:nextcloud-aio` is a task for all three reasons.
+
+### 46. A `secret()` in any file template blocks EVERY full bootstrap while the variable is unset
+
+Measured on 2026.9.14 and 2026.9.15: `[bootstrap.secrets] x = "NC_TEST_PW"` plus a
+`[bootstrap.files]` entry whose `content` uses `{{ secret(name="x") }}` (`template = true`), and a
+`[dotfiles]` marker.
+
+- Variable unset: `bootstrap --yes` → `failed to render template` / `required bootstrap secrets are
+  unavailable: x (NC_TEST_PW)`, rc 1, **nothing ran** (marker not deployed) — the documented
+  preflight, which resolves secrets before any phase.
+- Variable set: applied, file 0600, rc 0.
+- **Variable unset again, file already converged: rc 1 again.** The preflight renders every
+  selected template on every run; a converged target does not exempt it. `bootstrap plan` → the
+  file is `unknown`, rc 1.
+- Still fine without it: `bootstrap --only dotfiles` (rc 0) and `bootstrap status` (reports
+  `secret … missing` and `not inspected: required secret unavailable`, rc 0).
+
+So a declared secret turns every routine `mise bootstrap --yes` on that machine into
+`fnox exec -- mise bootstrap …` or `--prompt-secrets`. Nothing here declares one; Nextcloud AIO
+generates and keeps its own secrets.

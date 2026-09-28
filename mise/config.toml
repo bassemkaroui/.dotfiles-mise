@@ -256,6 +256,11 @@ run = [
     { task = "install:virtualbox" },
     { task = "install:vagrant" },
     { task = "install:zen" },
+    # 8. Services built on the apps above: Nextcloud AIO needs install:docker and
+    #    install:tailscale to have run. A task, not [bootstrap.compose] — the
+    #    task's header has the measured reasons (compose converges at step 7,
+    #    before Docker exists on a fresh machine, and aborts the whole run).
+    { task = "install:nextcloud-aio" },
 ]
 # Not in the chain, by design: setup:cosmic-theme, setup:cosmic-theme-clean and
 # update:gnome-extensions. The first two are menus — a chained task does get a

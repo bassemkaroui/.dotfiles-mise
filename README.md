@@ -81,6 +81,7 @@ env = ["graphical", "cosmic", "ai", "dev", "yazi", "neovim", "media", "laptop"]
 | `1password` | 1Password desktop app (apt) + the `op` CLI (mise tool) |
 | `browsers` | Brave (apt) + Zen (upstream tarball, the layout Zen's own installer uses) — implies `graphical` |
 | `virt` | VirtualBox, Oracle's build + Vagrant. Skips when a distro-packaged `virtualbox` is present; dkms modules need kernel headers, and Secure Boot needs a MOK enrolment |
+| `nextcloud` | Nextcloud AIO server, reachable only from your tailnet: `tailscale serve` publishes it on this machine's `*.ts.net` name. Starts AIO's mastercontainer, then prints the first-run clicks recorded in `services/nextcloud-aio/settings.toml`; `mise doctor project` checks them against AIO. Needs `docker` and `tailscale`, sudo once for `tailscale serve`, and HTTPS certificates enabled in the tailnet. Deselecting it leaves AIO running. Deploy steps: [`services/nextcloud-aio/README.md`](services/nextcloud-aio/README.md) |
 | `laptop` / `desktop` | device markers consumed by template-mode dotfiles (no standalone config) |
 
 `mise run setup:profiles` handles both directions: for an added profile it converges, for a
@@ -123,6 +124,7 @@ templates/        template-mode sources ({% if "laptop" in mise_env %}…)
 sandbox/          fake-$HOME verification harness
 scripts/          config collision lint
 vendor/           pristine upstream snapshots (merge base for update:tmux-local)
+services/         long-running services a task starts (nextcloud-aio: compose + recorded UI settings)
 docs/upstream/    vendored mise docs (gitignored; docs/fetch.sh refreshes)
 ```
 

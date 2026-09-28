@@ -19,6 +19,7 @@
 #   1password  1Password desktop app + the `op` CLI
 #   browsers   Brave (apt) + Zen (tarball)           (implies: graphical)
 #   virt       VirtualBox (Oracle build) + Vagrant
+#   nextcloud  Nextcloud AIO server, tailnet-only via tailscale serve  (implies: docker, tailscale)
 #   laptop     device marker for template-mode dotfiles (excludes desktop)
 #   desktop    device marker for template-mode dotfiles (excludes laptop)
 #

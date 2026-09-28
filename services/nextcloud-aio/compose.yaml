@@ -1,0 +1,48 @@
+# Nextcloud AIO mastercontainer — started by `mise run install:nextcloud-aio`
+# (nextcloud profile). Upstream original:
+#   https://github.com/nextcloud/all-in-one/blob/main/compose.yaml
+#
+# Only the mastercontainer lives here. AIO creates every other container
+# (apache, nextcloud, database, redis, talk, ...) itself through the Docker
+# socket and labels them into this same compose project (verified 2026-09-28:
+# com.docker.compose.project=nextcloud-aio), so compose would call them
+# "orphans": NEVER run this file with --remove-orphans, and never declare it as
+# a [bootstrap.compose] project, whose remove_orphans defaults to true.
+#
+# Deviations from upstream, all for "behind tailscale serve, on a laptop":
+#   - No 80/8443. AIO does not terminate TLS here; `tailscale serve` does.
+#   - 8080 (the AIO admin interface) is bound to 127.0.0.1, not every
+#     interface: a laptop joins untrusted networks, and ports Docker publishes
+#     bypass ufw. Open https://127.0.0.1:8080 on this machine.
+#   - APACHE_PORT / APACHE_IP_BINDING: Nextcloud's own apache listens on
+#     127.0.0.1:11000, the target of `tailscale serve --bg http://127.0.0.1:11000`.
+#   - SKIP_DOMAIN_VALIDATION: AIO's check resolves the domain and connects to it
+#     on 443 from INSIDE the container, and a *.ts.net name only resolves inside
+#     the tailnet. The nextcloud-aio-settings doctor check compares the domain
+#     against tailscale's own name instead, which catches a typo just as well.
+#     (AIO compares the variable to the exact string "true".)
+#
+# Kept exactly as upstream, which says they must not change: the project name,
+# the container name (mastercontainer self-updates rely on it) and the volume
+# name (the built-in backup relies on it). The image stays :latest because AIO
+# updates itself from its own interface; the task never pulls or recreates.
+name: nextcloud-aio
+services:
+  nextcloud-aio-mastercontainer:
+    image: ghcr.io/nextcloud-releases/all-in-one:latest
+    init: true
+    restart: always
+    container_name: nextcloud-aio-mastercontainer
+    volumes:
+      - nextcloud_aio_mastercontainer:/mnt/docker-aio-config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    network_mode: bridge
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      APACHE_PORT: "11000"
+      APACHE_IP_BINDING: "127.0.0.1"
+      SKIP_DOMAIN_VALIDATION: "true"
+volumes:
+  nextcloud_aio_mastercontainer:
+    name: nextcloud_aio_mastercontainer

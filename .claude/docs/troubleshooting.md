@@ -310,7 +310,29 @@ permissions entry's target is a whole directory, and moving it aside moves your 
 Each check's hint line is the fix. They are the `[doctor.checks]` in `mise/config.toml` (plus
 `nerd-font`, `i2c-membership` and `tree-sitter-runs` from the graphical, cosmic and neovim
 profile files), each one a failure mode from this page. `i2c-membership` checks the *session's*
-groups, so it keeps failing after `setup:cosmic` until you log out and back in.
+groups, so it keeps failing after `setup:cosmic` until you log out and back in. The four
+`nextcloud-aio-*` checks come from `config.nextcloud.toml`; see the next entry.
+
+### `install:nextcloud-aio` skipped, or a `nextcloud-aio-*` check FAILs
+
+The task `skip`s rather than fail, so read its WARN line:
+
+- **"This session predates your docker group membership"**: `install:docker` just added you. Log
+  out and back in, then `mise run install:nextcloud-aio`.
+- **"HTTPS certificates are off in your tailnet"**: Tailscale admin console → DNS → enable
+  MagicDNS and HTTPS Certificates. **"Tailscale is not connected"**: `sudo tailscale up`.
+- **"Could not publish on the tailnet"**: `tailscale serve` needs root here and there was no
+  terminal to ask at. Run the task from a terminal, or
+  `sudo tailscale serve --bg --yes http://127.0.0.1:11000`.
+- **"Not touching tailscale serve (… already serving something else)"**: something else holds
+  :443 on this node (`tailscale serve status`). The task never overwrites it.
+
+`mise doctor project` shows only a check's exit status. For the details, run
+`python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check` (or `running`, `serve`,
+`backup`). An office suite reported as `eurooffice` when `settings.toml` records something else
+means the choice was never saved: Euro-Office is AIO's default. `nextcloud-aio-backup` fails by design until a
+backup target is configured. Deploy, update and removal steps are in
+`services/nextcloud-aio/README.md`.
 
 ---
 

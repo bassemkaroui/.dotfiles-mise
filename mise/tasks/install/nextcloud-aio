@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#MISE description="Start Nextcloud AIO and publish it on the tailnet with tailscale serve (nextcloud profile)"
+#MISE raw=true
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:nextcloud-aio"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+
+# Nextcloud AIO is one "mastercontainer" (services/nextcloud-aio/compose.yaml)
+# that creates, updates and backs up every other Nextcloud container itself.
+# This task starts it and publishes it with `tailscale serve`; everything else
+# happens in AIO's own interface, recorded in services/nextcloud-aio/settings.toml
+# and checked by the nextcloud-aio-* doctor checks (`mise doctor project`).
+#
+# A task and not a [bootstrap.compose] project, for three reasons:
+#   1. Compose projects converge at bootstrap step 7; Docker arrives at step 17
+#      (install:docker — vendor apps stay tasks). With Docker absent the compose
+#      step fails "refusing unsafe change" and aborts the run before dotfiles,
+#      tools and this whole chain — measured on 2026.9.14 and 9.15. A fresh
+#      machine's first bootstrap would die.
+#   2. AIO adds its sibling containers to the same compose project, and
+#      [bootstrap.compose] removes orphans by default: it would delete them.
+#   3. AIO recreates the mastercontainer when it updates itself. A declarative
+#      owner would fight it; this task only ever creates it when absent.
+#
+# So, by design: create when absent, start when stopped, otherwise hands off.
+# Never pull, never recreate, never --remove-orphans. Updates happen from AIO's
+# interface, which keeps "upgrades are opt-in". A changed compose.yaml is NOT
+# applied to an existing container: AIO wants its containers stopped from its
+# interface first, then `docker compose -f <file> up -d --force-recreate` by hand.
+require_profile nextcloud
+
+COMPOSE="$REPO/services/nextcloud-aio/compose.yaml"
+HELPER="$LIB/nextcloud_aio.py"
+MASTER="nextcloud-aio-mastercontainer"
+BACKEND="http://127.0.0.1:11000"
+
+[[ -f "$COMPOSE" ]] || fail "$COMPOSE is missing — is $REPO a complete clone?"
+have python3 || skip "python3 is needed to read AIO's state"
+
+# ─── Preflight: nothing changes unless Docker AND the tailnet are ready ──────
+
+have docker || skip "Docker is not installed (the docker profile's install:docker provides it)"
+docker compose version &>/dev/null || skip "The docker compose plugin is missing (install:docker installs it)"
+if ! docker info &>/dev/null; then
+    # A fresh machine: install:docker just added us to the group, but this
+    # session's credentials predate it.
+    if id -nG "$USER" 2>/dev/null | grep -qw docker && ! id -nG | grep -qw docker; then
+        skip "This session predates your docker group membership — log out and back in, then: mise run install:nextcloud-aio"
+    fi
+    skip "Cannot reach the Docker daemon (sudo systemctl start docker?)"
+fi
+
+have tailscale || skip "Tailscale is not installed (enable the tailscale profile)"
+rc=0
+DOMAIN="$(python3 "$HELPER" domain)" || rc=$?
+case "$rc" in
+    0) ;;
+    2) skip "HTTPS certificates are off in your tailnet — enable MagicDNS and HTTPS in the admin console (DNS tab), then re-run" ;;
+    *) skip "Tailscale is not connected — join the tailnet (sudo tailscale up), then re-run" ;;
+esac
+
+# ─── The mastercontainer ─────────────────────────────────────────────────────
+
+STATE="$(python3 "$HELPER" state)"
+case "$STATE" in
+    absent)
+        info "Creating $MASTER (pulls the AIO image on first run) ..."
+        docker compose --file "$COMPOSE" up --detach \
+            || skip "docker compose could not start $MASTER — see the output above"
+        ok_changed "$MASTER created"
+        ;;
+    running) ok "$MASTER is running" ;;
+    created | exited)
+        docker start "$MASTER" >/dev/null || skip "Could not start $MASTER"
+        ok_changed "$MASTER started"
+        ;;
+    *) warn "$MASTER is '$STATE' — leaving it alone" ;;
+esac
+
+# ─── tailscale serve ─────────────────────────────────────────────────────────
+# Changing the serve config needs root on this machine (no operator is set).
+# `--bg` persists it in tailscaled's state, across reboots; `--yes` keeps it from
+# ever prompting, which would hang an unattended chain. The helper refuses
+# to treat anything else already on :443 as ours, so this never clobbers it.
+
+rc=0
+SERVE="$(python3 "$HELPER" serve)" || rc=$?
+case "$rc" in
+    0) ok "tailscale serve: $SERVE" ;;
+    1)
+        if sudo_ok && sudo -n tailscale serve --bg --yes "$BACKEND"; then
+            ok_changed "Published https://$DOMAIN on the tailnet -> $BACKEND"
+        else
+            warn "Could not publish on the tailnet — run by hand: sudo tailscale serve --bg $BACKEND"
+        fi
+        ;;
+    2) warn "Not touching tailscale serve ($SERVE) — free :443 or point it at $BACKEND by hand" ;;
+    *) warn "Could not read the tailscale serve config: $SERVE" ;;
+esac
+
+# ─── AIO's own setup: done, or the recorded clicks ───────────────────────────
+
+rc=0
+python3 "$HELPER" setup-done || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+    ok "Nextcloud: https://$DOMAIN"
+    if ! out="$(python3 "$HELPER" check)"; then
+        while IFS= read -r line; do warn "$line"; done <<<"$out"
+        warn "(recorded in services/nextcloud-aio/settings.toml — fix it in AIO's interface or record the new value)"
+    fi
+    python3 "$HELPER" backup >/dev/null \
+        || info "No backup location in AIO yet (deferred) — set one in its interface when decided"
+else
+    info "AIO's first-run setup is not done yet. The recorded steps:"
+    while IFS= read -r line; do info "  $line"; done < <(python3 "$HELPER" checklist)
+fi

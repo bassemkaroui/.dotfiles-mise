@@ -22,7 +22,7 @@ NONINTERACTIVE="${DOTFILES_NONINTERACTIVE:-0}"
 [[ -t 0 ]] || NONINTERACTIVE=1
 
 KNOWN_PROFILES=(graphical gnome cosmic ai dev yazi neovim media latex
-    veracrypt tailscale docker 1password browsers virt laptop desktop)
+    veracrypt tailscale docker 1password browsers virt nextcloud laptop desktop)
 
 info() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }

@@ -39,6 +39,8 @@ templates/          template-mode sources ({% if mise_env is defined and "laptop
 sandbox/mkhome.sh   throwaway-$HOME verification harness
 scripts/lint-config.py   the config lint CI runs
 vendor/             pristine upstream snapshots (merge base for update:tmux-local)
+services/           long-running services a task starts — nextcloud-aio/: compose.yaml, the
+                    recorded UI settings, and its README (deploy/remove)
 docs/fetch.sh       populates docs/upstream/ — run it after cloning
 docs/upstream/      vendored mise docs (NOT committed; absent until fetched)
 ```

@@ -1,0 +1,34 @@
+# Profile: nextcloud — a Nextcloud AIO server on this machine, reachable only
+# from the tailnet through `tailscale serve`. Needs the docker and tailscale
+# profiles too ("implies" is documentation, not mechanics: list them).
+#
+# Everything that acts is install:nextcloud-aio; its header has the measured
+# reasons it is a task and not a [bootstrap.compose] project. This file holds
+# only the health checks — which is also why `mise bootstrap unapply nextcloud`
+# has nothing to remove: deselecting the profile leaves AIO running, and
+# removing it starts in AIO's own interface (stop its containers there first).
+#
+# All four go through the same helper, which reads AIO's configuration.json
+# read-only and prints only the recorded keys, never AIO's passphrase or the
+# secrets it generates. Run it by hand for the details a failing check hides:
+#   python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check
+
+[doctor.checks.nextcloud-aio-running]
+description = "the Nextcloud AIO mastercontainer is running"
+run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py running"
+hint = "mise run install:nextcloud-aio"
+
+[doctor.checks.nextcloud-aio-serve]
+description = "tailscale serve publishes Nextcloud: https :443 -> http://127.0.0.1:11000"
+run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py serve"
+hint = "mise run install:nextcloud-aio (asks for sudo), or: sudo tailscale serve --bg http://127.0.0.1:11000"
+
+[doctor.checks.nextcloud-aio-settings]
+description = "AIO's interface settings match services/nextcloud-aio/settings.toml"
+run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check"
+hint = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check lists the differences; fix them at https://127.0.0.1:8080 or record the new value"
+
+[doctor.checks.nextcloud-aio-backup]
+description = "AIO has a backup location (it must be off this machine's disk)"
+run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py backup"
+hint = "set one in AIO's interface at https://127.0.0.1:8080 (Backup and restore)"

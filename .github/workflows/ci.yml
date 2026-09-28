@@ -55,7 +55,7 @@ jobs:
           - "ai,dev,yazi,neovim,media,latex"
           - "graphical,gnome,laptop"
           - "graphical,cosmic,desktop"
-          - "veracrypt"
+          - "veracrypt,nextcloud"
     steps:
       - uses: actions/checkout@v4
       - name: Install mise

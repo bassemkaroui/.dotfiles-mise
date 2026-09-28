@@ -1,0 +1,46 @@
+# The Nextcloud AIO settings that live in its web interface rather than in any
+# file we can hand it (AIO keeps them in configuration.json inside the
+# nextcloud_aio_mastercontainer volume, alongside secrets it generates).
+# Recorded here so a rebuild is a checklist, not a memory test:
+#
+#   - install:nextcloud-aio prints them as a checklist while setup is incomplete;
+#   - the nextcloud-aio-settings doctor check compares them with the live
+#     configuration.json (read-only, and only the keys named below).
+#
+# Keys are AIO's own names (php/src/Data/ConfigurationManager.php). They are
+# undocumented upstream. A key AIO never saved means AIO's default, and the
+# check applies the same defaults. If AIO ever renames a key, the check falls
+# back to that default too, so re-read ConfigurationManager.php when an AIO
+# update changes the interface.
+#
+# Not recorded, derived on the machine instead:
+#   domain    `tailscale status --json` → Self.DNSName, the name `tailscale serve`
+#             publishes (so no tailnet name is committed anywhere)
+#   timezone  the host's (`timedatectl show -p Timezone --value`)
+
+# Office suite: "" (none), "collabora", "eurooffice" or "onlyoffice" (deprecated:
+# AIO keeps it where it already is but will not select it anew). Euro-Office
+# chosen 2026-09-28; it is also AIO's default when nothing was ever saved.
+# Behind tailscale serve it talks to Nextcloud through the public *.ts.net name
+# in BOTH directions; AIO's containers resolve that name (they sit on a
+# user-defined network, whose DNS forwards to systemd-resolved — measured).
+officeSuite = "eurooffice"
+
+# The first-run "Install Nextcloud Hub <newer>" checkbox (AIO: install_latest_major).
+# false = the major the AIO image ships (34, "Hub 26 Spring" on 2026-09-28);
+# true = that, then an immediate updater run to AIO's LATEST_MAJOR_VERSION (35).
+# First-run only, so the check does not compare it: AIO's "upgrade to latest
+# major" action rewrites it later, and majors never go back down.
+installLatestMajor = false
+
+[containers]
+# Talk off: no calls or video wanted (2026-09-28). It is also the only AIO
+# container that publishes a host port on EVERY interface (TURN, 3478 tcp+udp,
+# no binding setting), and AIO's default is on — so untick it explicitly.
+isTalkEnabled = false
+# Only takes effect with Talk; AIO forces it off otherwise.
+isTalkRecordingEnabled = false
+isImaginaryEnabled = true
+isWhiteboardEnabled = true
+isClamavEnabled = false
+isFulltextsearchEnabled = false

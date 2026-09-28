@@ -39,7 +39,7 @@ require_profile example
 | `zen.sh` | Zen tarball fetch/install/launcher, shared by `install:zen` and `update:zen` |
 | `gpg.sh` | shared helpers for the `gpg:*` suite |
 | `cosmic_theme.py` | COSMIC theme picker helper (invoked as `python3 "$HELPER"`) |
-| `nextcloud_aio.py` | Nextcloud AIO state for `install:nextcloud-aio` and the `nextcloud-aio-*` doctor checks: `state running domain serve setup-done check backup checklist`. Reads AIO's `configuration.json` via `docker exec`, keeps only the keys `services/nextcloud-aio/settings.toml` records, applies AIO's own defaults |
+| `nextcloud_aio.py` | Nextcloud AIO state for `install:nextcloud-aio` and the `nextcloud-aio-*` doctor checks: `state running domain serve setup-done check backup datadir checklist`. Reads AIO's `configuration.json` via `docker exec`, keeps only the keys `services/nextcloud-aio/settings.toml` records, applies AIO's own defaults |
 
 `sudo_ok` deserves a note: it returns true when sudo can elevate *here and now*, leaving a cached
 timestamp so the caller's own `sudo -n` calls succeed. Gating on `sudo -n` alone would make every
@@ -76,7 +76,7 @@ so the list is unconditional.
 | 20 | `install:virtualbox` | Oracle's build (`virt`) + `vboxusers` |
 | 21 | `install:vagrant` | Vagrant (`virt`) |
 | 22 | `install:zen` | Zen browser tarball (`browsers`) — the largest download |
-| 23 | `install:nextcloud-aio` | Nextcloud AIO mastercontainer + `tailscale serve` (`nextcloud`), after the docker and tailscale installs it needs. Creates when absent, starts when stopped, otherwise hands off; never pulls, recreates or `--remove-orphans`. Prints the recorded first-run clicks until AIO's setup is done |
+| 23 | `install:nextcloud-aio` | Nextcloud AIO mastercontainer + `tailscale serve` (`nextcloud`), after the docker and tailscale installs it needs. Creates when absent, starts when stopped, otherwise hands off; never pulls, recreates or `--remove-orphans`. Prints the recorded first-run clicks until AIO's setup is done. With a per-machine `NEXTCLOUD_DATADIR` on a separate mount, writes a docker.service drop-in `After=<that mount>` (sudo); an empty `NEXTCLOUD_DATADIR` is unset before Compose sees it |
 
 `setup:repo-remotes` is safe to chain because mise identifies a clone by its `origin` URL **alone**
 (`bootstrap/repos.md`, "Safe updates only"), so an extra remote never turns a repo `conflict`; and

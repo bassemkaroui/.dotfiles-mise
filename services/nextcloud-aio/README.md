@@ -11,7 +11,7 @@ itself; `tailscale serve` publishes it with a certificate Tailscale issues.
 | `settings.toml` | the settings that live in AIO's web interface, recorded (office suite, optional containers) |
 | `mise/tasks/install/nextcloud-aio` | starts the mastercontainer, publishes it, prints the first-run checklist |
 | `mise/tasks/lib/nextcloud_aio.py` | reads AIO's state read-only — only the recorded keys, never its passphrase or secrets |
-| `mise/config.nextcloud.toml` | four `[doctor.checks]`: running, published, settings match, backup set |
+| `mise/config.nextcloud.toml` | five `[doctor.checks]`: running, published, settings match, backup set, data directory |
 
 What the repo cannot declare — the domain, the containers, the office suite, backups — is set once
 in AIO's interface, **recorded** in `settings.toml`, and **checked** by `mise doctor project`.
@@ -82,11 +82,54 @@ server address.
   --force-recreate`, then start them again from the interface. **Never add `--remove-orphans`**:
   AIO puts its own containers in the same compose project, so compose would delete them as orphans.
 
+## Keeping the files on another disk
+
+Uploads go to AIO's `nextcloud_aio_nextcloud_data` volume under `/var/lib/docker` by default. To put
+them on a bigger disk, set `NEXTCLOUD_DATADIR` **per machine**, never in this repo. There are two
+places for it:
+
+```toml
+# ~/.config/mise/config.local.toml — one machine, nothing to commit
+[env]
+NEXTCLOUD_DATADIR = "/mnt/Data/nextcloud"
+```
+
+```toml
+# ~/.dotfiles-custom-mise/mise/config.custom.toml — the companion, gated on a profile
+# (what the laptop uses). Renders "" elsewhere, which the task treats as unset.
+[env]
+NEXTCLOUD_DATADIR = "{% if mise_env is defined and 'laptop' in mise_env %}/mnt/Data/nextcloud{% endif %}"
+```
+
+`compose.yaml` passes the variable to AIO by name, and `install:nextcloud-aio` first turns an empty
+value into an unset one: Compose would otherwise hand AIO `""`, which AIO would save as its datadir. It must be a subfolder of an ext4 (or other
+Unix-permission) filesystem, not the mount point itself. When that filesystem is a separate mount,
+`install:nextcloud-aio` writes a systemd drop-in so Docker starts only after it is mounted, since a
+`nofail` fstab entry no longer orders the boot. The `nextcloud-aio-datadir` check compares the
+directory Nextcloud really has mounted with the configured one. AIO also saves the value itself,
+so a later missing variable does not silently switch back.
+
+**On a fresh install** set it before the first deploy, and that is all. **On an existing install**
+it is a migration (the procedure from AIO's maintainer, discussion #890):
+
+1. AIO interface → **Stop containers**, and wait until everything is stopped.
+2. `docker stop nextcloud-aio-mastercontainer && docker rm nextcloud-aio-mastercontainer`
+   (no data is lost; the configuration lives in its volume).
+3. Copy the files with their ownership (www-data, uid 33):
+   `sudo rsync -aHAX --numeric-ids /var/lib/docker/volumes/nextcloud_aio_nextcloud_data/_data/ /mnt/Data/nextcloud/`
+4. Add one of the `[env]` settings above, then run `mise run install:nextcloud-aio` from a terminal. It recreates the
+   mastercontainer with the new value and asks for sudo to write the drop-in.
+5. AIO interface → **Start containers**, then check `mise doctor project` and that a new upload lands
+   in the new directory.
+6. Keep the old volume until you are sure, then `docker volume rm nextcloud_aio_nextcloud_data`.
+
 ## Backups (not configured yet)
 
 Deferred on 2026-09-27; `nextcloud-aio-backup` fails until a target is set. In AIO's interface,
 under backups, choose a host path on a drive that is **not** this machine's disk, or a remote borg
 repository. AIO then shows a backup password once; it goes in 1Password next to the passphrase.
+AIO refuses a location inside `NEXTCLOUD_DATADIR`, and a second disk in the same laptop does not
+protect against losing the laptop.
 Restoring on a new machine means the deploy steps up to the interface, then **restore** instead of
 a new instance. It needs only the archive and that password.
 

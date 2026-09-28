@@ -331,7 +331,10 @@ The task `skip`s rather than fail, so read its WARN line:
 `python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check` (or `running`, `serve`,
 `backup`). An office suite reported as `eurooffice` when `settings.toml` records something else
 means the choice was never saved: Euro-Office is AIO's default. `nextcloud-aio-backup` fails by design until a
-backup target is configured. Deploy, update and removal steps are in
+backup target is configured. `nextcloud-aio-datadir` failing means the directory Nextcloud has
+mounted is not the configured one (`$NEXTCLOUD_DATADIR`, else AIO's saved value, else its default
+volume). Usually `NEXTCLOUD_DATADIR` was changed without the migration, or the containers were not
+restarted from AIO's interface after it. Deploy, update, data-directory and removal steps are in
 `services/nextcloud-aio/README.md`.
 
 ---

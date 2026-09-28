@@ -7,9 +7,9 @@ to do it in.
 
 Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 2026-09-01
 (entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14. Re-verified against
-**2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new; 45 and 46 (the compose
-and secrets resources, measured for the `nextcloud` profile) were added on 2026-09-28. The repo now
-requires 2026.9.15 (`install.sh` refuses older).
+**2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new; 45-47 (the compose
+and secrets resources, and per-profile values, measured for the `nextcloud` profile) were added on
+2026-09-28. The repo now requires 2026.9.15 (`install.sh` refuses older).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -711,3 +711,30 @@ Measured on 2026.9.14 and 2026.9.15: `[bootstrap.secrets] x = "NC_TEST_PW"` plus
 So a declared secret turns every routine `mise bootstrap --yes` on that machine into
 `fnox exec -- mise bootstrap …` or `--prompt-secrets`. Nothing here declares one; Nextcloud AIO
 generates and keeps its own secrets.
+
+### 47. Per-profile values: `config.<env>.local.toml` gates natively; an `[env]` condition renders `""`
+
+Measured on 2026.9.15, in `/tmp` sandboxes and then on the real machine, while moving the laptop's
+`NEXTCLOUD_DATADIR` into the companion (2026-09-28):
+
+- **`~/.config/mise/config.<env>.local.toml` is env-gated by mise itself**, and a symlink works:
+  with `config.laptop.local.toml` declaring `[env] X`, `mise env` had X for `env = ["laptop"]` and
+  `["docker", "laptop", "nextcloud"]`, and not for `["desktop"]` or `[]`. **This repo cannot use it
+  from the companion.** `lint-config.py --live` reserves every `~/.config/mise/**` `[dotfiles]`
+  target for the main `config.toml` ("self-management: … only the repo's config.toml may manage
+  ~/.config/mise/** targets"), and `setup:custom-hookup` answered by unlinking the whole drop-in.
+  Reverted and re-linked. On the way back it moved an unchanged `~/.ssh/config` to
+  `.pre-mise.bak1` (content identical per `cmp`): harmless, but its backup can fire on a file with
+  no real difference.
+- **A `mise_env` condition in an `[env]` value works from a `conf.d` drop-in, but a false branch
+  sets `""`, not unset.** `X = "{% if mise_env is defined and 'laptop' in mise_env %}v{% endif %}"`
+  gave `'v'` with laptop (also inside `mise run` tasks), and `''` for `["desktop"]` and `[]`.
+- **Compose passes the difference on.** `environment: X:` (map form, no value) with X unset renders
+  `X: null` and the container gets no X (checked in a real throwaway container). With `X=""`
+  exported it renders `X: ""` and the container gets an empty X. For AIO, an empty
+  `NEXTCLOUD_DATADIR` is a value (`getenv` returns `""`, not `false`), which it would save as its
+  datadir.
+
+Consequences: the companion carries the laptop's datadir as a conditional `[env]` (CUSTOM.md,
+*Device variants*), and `install:nextcloud-aio` unsets an empty `NEXTCLOUD_DATADIR` before calling
+Compose. Any other consumer of a conditional `[env]` has to treat empty as absent the same way.

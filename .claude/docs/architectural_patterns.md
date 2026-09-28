@@ -328,6 +328,9 @@ Its contract (full version in `CUSTOM.md`):
 - its sources must exist whenever its config file does, since a missing explicit source aborts
   the entire apply — this repo's files included
 - it must live at `~/.dotfiles-custom-mise`, because `[dotfiles].source` is not templated
+- it may carry settings as `[env]`, but never a target under `~/.config/mise/`, which only this
+  repo's `config.toml` manages. A per-profile value is a `mise_env` condition in the value, and
+  it renders `""` (not unset) where it does not match (`mise_behaviours.md` 47)
 
 `setup:custom-hookup` removes the drop-in link again if the live lint fails, so a broken
 companion cannot take the main repo down. It also `mise trust`s the drop-in itself. On 2026.7.x

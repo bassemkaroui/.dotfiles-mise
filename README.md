@@ -141,7 +141,7 @@ setup:
 
 ```
 ~/.dotfiles-custom-mise/       (the path is baked into its own sources — see CUSTOM.md)
-├── mise/config.custom.toml    [dotfiles] entries with explicit absolute sources
+├── mise/config.custom.toml    [dotfiles] entries with explicit absolute sources, [env] settings
 ├── home/                      the files those entries point at
 └── templates/                 *.tmpl for per-machine variants
 ```

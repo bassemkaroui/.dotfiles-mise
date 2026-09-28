@@ -21,6 +21,16 @@
 #     the tailnet. The nextcloud-aio-settings doctor check compares the domain
 #     against tailscale's own name instead, which catches a typo just as well.
 #     (AIO compares the variable to the exact string "true".)
+#   - NEXTCLOUD_DATADIR, passed through BY NAME: where Nextcloud keeps the
+#     files people upload. Set per machine, never here — in
+#     ~/.config/mise/config.local.toml `[env]`, or as the companion repo's
+#     `[env]` with a mise_env condition (how the laptop does it); either reaches
+#     `mise run install:nextcloud-aio`, which turns an EMPTY value (the condition
+#     not matching) into unset before calling compose. Unset, compose leaves it out
+#     of the container entirely (verified: it renders as null) and AIO uses its
+#     default volume. Once set, AIO saves the value in its own configuration and
+#     keeps using it even if the variable later goes missing. Changing it after
+#     the first install is a migration, not an edit: services/nextcloud-aio/README.md.
 #
 # Kept exactly as upstream, which says they must not change: the project name,
 # the container name (mastercontainer self-updates rely on it) and the volume
@@ -43,6 +53,7 @@ services:
       APACHE_PORT: "11000"
       APACHE_IP_BINDING: "127.0.0.1"
       SKIP_DOMAIN_VALIDATION: "true"
+      NEXTCLOUD_DATADIR:
 volumes:
   nextcloud_aio_mastercontainer:
     name: nextcloud_aio_mastercontainer

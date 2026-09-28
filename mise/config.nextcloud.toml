@@ -8,7 +8,7 @@
 # has nothing to remove: deselecting the profile leaves AIO running, and
 # removing it starts in AIO's own interface (stop its containers there first).
 #
-# All four go through the same helper, which reads AIO's configuration.json
+# All five go through the same helper, which reads AIO's configuration.json
 # read-only and prints only the recorded keys, never AIO's passphrase or the
 # secrets it generates. Run it by hand for the details a failing check hides:
 #   python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check
@@ -32,3 +32,8 @@ hint = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py check lists the
 description = "AIO has a backup location (it must be off this machine's disk)"
 run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py backup"
 hint = "set one in AIO's interface at https://127.0.0.1:8080 (Backup and restore)"
+
+[doctor.checks.nextcloud-aio-datadir]
+description = "Nextcloud's files live where configured ($NEXTCLOUD_DATADIR, else AIO's saved setting or default volume)"
+run = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py datadir"
+hint = "python3 ~/.dotfiles-mise/mise/tasks/lib/nextcloud_aio.py datadir shows both sides; a changed NEXTCLOUD_DATADIR needs the migration in services/nextcloud-aio/README.md"

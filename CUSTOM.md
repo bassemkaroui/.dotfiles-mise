@@ -5,11 +5,12 @@ host names and ports, work tooling, a machine's extension manifest. Those live i
 a second, private repo that this one *loads* but never contains.
 
 The companion is **data, not a program**. It ships no installer, no tasks and no
-bootstrap logic — just files plus one small config file that says where they go.
+bootstrap logic — just files plus one small config file that says where they go,
+and which may also carry plain settings as `[env]`.
 
 ```
 ~/.dotfiles-custom-mise/
-├── mise/config.custom.toml   # [dotfiles] entries, explicit absolute sources
+├── mise/config.custom.toml   # [dotfiles] entries (explicit absolute sources), [env] settings
 ├── home/                     # the private files those entries point at
 └── templates/                # *.tmpl sources for template-mode entries
 ```
@@ -68,7 +69,15 @@ Each of these is a way to break **every** machine, not just the companion:
    to match.
 
 No `[tools]`, `[bootstrap.*]` or `[tasks]` in the companion: those belong here,
-where they are linted and reviewed.
+where they are linted and reviewed. `[env]` is fine, since it is data. Its keys are
+collision-linted like everything else, so a variable is declared in one file only.
+
+It may **not** deploy anything under `~/.config/mise/`, not even a
+`config.<profile>.local.toml` that mise would gate by itself. `lint-config.py
+--live` reserves every `~/.config/mise/**` target for this repo's `config.toml`
+(self-management), and `setup:custom-hookup` answers a violation by unlinking the
+whole drop-in (it happened, 2026-09-28). A value only some machines should get is
+a condition in the `[env]` value instead; see *Device variants*.
 
 One exception is worth knowing about but is **not** taken today: `[bootstrap.users]`
 needs a literal user name (mise rejects `[bootstrap.users."{{ env.USER }}"]`), so
@@ -120,6 +129,18 @@ every other dotfile with it, machine-wide (verified 2026-07-22). Guard every
 `in mise_env` test.
 
 `templates/ssh_config.tmpl.example` in this repo documents the mechanism.
+
+A **setting** that differs per profile uses the same test inside an `[env]` value
+of `config.custom.toml`, with the same mandatory guard:
+
+```toml
+[env]
+NEXTCLOUD_DATADIR = "{% if mise_env is defined and 'laptop' in mise_env %}/mnt/Data/nextcloud{% endif %}"
+```
+
+Where the condition does not match, the variable is set to **`""`, not unset**
+(measured on 2026.9.15). Whatever consumes it must treat empty as absent;
+`install:nextcloud-aio` does so for this one (`mise_behaviours.md` 47).
 
 > **Template mode overwrites a pre-existing real file silently** — no error, no
 > backup, where `mode = "symlink"` refuses. Both entry points therefore back up

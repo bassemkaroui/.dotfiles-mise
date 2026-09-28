@@ -33,6 +33,13 @@ source "$LIB/profile.sh"
 # interface first, then `docker compose -f <file> up -d --force-recreate` by hand.
 require_profile nextcloud
 
+# NEXTCLOUD_DATADIR may arrive EMPTY: a per-machine value written as a mise_env
+# condition (the companion's laptop-only `[env]`) renders "" where it does not
+# apply. compose.yaml passes the variable by name, and an empty one reaches AIO
+# as "" (verified: `NEXTCLOUD_DATADIR: ""`), which AIO would save as its datadir.
+# Unset is what means "AIO's default".
+[[ -n "${NEXTCLOUD_DATADIR:-}" ]] || unset NEXTCLOUD_DATADIR
+
 COMPOSE="$REPO/services/nextcloud-aio/compose.yaml"
 HELPER="$LIB/nextcloud_aio.py"
 MASTER="nextcloud-aio-mastercontainer"
@@ -81,6 +88,46 @@ case "$STATE" in
     *) warn "$MASTER is '$STATE' — leaving it alone" ;;
 esac
 
+# ─── A data directory on another disk: Docker starts after its mount ─────────
+# NEXTCLOUD_DATADIR is per machine (~/.config/mise/config.local.toml `[env]`) and
+# reaches compose.yaml by name. When it sits on a disk fstab mounts with `nofail`
+# — /mnt/Data here — the boot no longer waits for that mount, so Docker could
+# start first and give Nextcloud an empty directory on the root disk. A drop-in
+# restores the order. After= rather than RequiresMountsFor=: a disk that fails to
+# mount should cost Nextcloud, not every container on the machine (WantsMountsFor=
+# says exactly that, but needs systemd 256; noble ships 255).
+
+if [[ -n "${NEXTCLOUD_DATADIR:-}" ]]; then
+    if [[ "$NEXTCLOUD_DATADIR" != /* ]]; then
+        warn "NEXTCLOUD_DATADIR=$NEXTCLOUD_DATADIR must be an absolute path (AIO rejects anything else)"
+    else
+        # findmnt --target needs an existing path, and the datadir may not exist yet.
+        probe="$NEXTCLOUD_DATADIR"
+        while [[ ! -e "$probe" ]]; do probe="$(dirname "$probe")"; done
+        MOUNT="$(findmnt -n -o TARGET --target "$probe" 2>/dev/null || true)"
+        DROPIN=/etc/systemd/system/docker.service.d/nextcloud-datadir.conf
+        if [[ -z "$MOUNT" || "$MOUNT" == / ]]; then
+            ok "NEXTCLOUD_DATADIR=$NEXTCLOUD_DATADIR is on the root filesystem — no mount to wait for"
+        else
+            UNIT="$(systemd-escape --path --suffix=mount "$MOUNT")"
+            WANT="# Managed by install:nextcloud-aio (~/.dotfiles-mise): NEXTCLOUD_DATADIR
+# ($NEXTCLOUD_DATADIR) lives on $MOUNT; start Docker only after it is mounted.
+[Unit]
+After=$UNIT"
+            if [[ "$(cat "$DROPIN" 2>/dev/null)" == "$WANT" ]]; then
+                ok "Docker starts after $UNIT (NEXTCLOUD_DATADIR=$NEXTCLOUD_DATADIR)"
+            elif sudo_ok \
+                && sudo -n mkdir -p "$(dirname "$DROPIN")" \
+                && printf '%s\n' "$WANT" | sudo -n tee "$DROPIN" >/dev/null \
+                && sudo -n systemctl daemon-reload; then
+                ok_changed "Docker now starts after $UNIT ($DROPIN)"
+            else
+                warn "Could not write $DROPIN — without it Docker may start before $MOUNT is mounted at boot"
+            fi
+        fi
+    fi
+fi
+
 # ─── tailscale serve ─────────────────────────────────────────────────────────
 # Changing the serve config needs root on this machine (no operator is set).
 # `--bg` persists it in tailscaled's state, across reboots; `--yes` keeps it from
@@ -114,6 +161,13 @@ if [[ "$rc" -eq 0 ]]; then
     fi
     python3 "$HELPER" backup >/dev/null \
         || info "No backup location in AIO yet (deferred) — set one in its interface when decided"
+    rc=0
+    out="$(python3 "$HELPER" datadir)" || rc=$?
+    case "$rc" in
+        0) ok "Nextcloud's files: ${out#datadir: }" ;;
+        1) warn "$out — migrate it: services/nextcloud-aio/README.md" ;;
+        *) info "$out" ;;
+    esac
 else
     info "AIO's first-run setup is not done yet. The recorded steps:"
     while IFS= read -r line; do info "  $line"; done < <(python3 "$HELPER" checklist)

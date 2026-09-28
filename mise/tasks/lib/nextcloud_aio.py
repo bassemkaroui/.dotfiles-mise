@@ -11,6 +11,7 @@ Commands (exit codes in brackets):
   setup-done  AIO's first-run setup was completed            [0 yes, 1 no, 2 unreadable]
   check       AIO's settings match settings.toml             [0 match, 1 differ, 2 unreadable]
   backup      a backup target is configured in AIO           [0 yes, 1 no, 2 unreadable]
+  datadir     Nextcloud's files live where configured        [0 yes, 1 no, 2 unreadable]
   checklist   print the first-run clicks, domain filled in   [0]
 
 AIO keeps its settings in configuration.json inside the mastercontainer's
@@ -21,6 +22,7 @@ php/src/Data/ConfigurationManager.php (main branch, 2026-09-27).
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +30,9 @@ import tomllib
 from pathlib import Path
 
 MASTER = "nextcloud-aio-mastercontainer"
+NEXTCLOUD = "nextcloud-aio-nextcloud"
+# AIO's NEXTCLOUD_DATADIR default: a named volume, not a path.
+DEFAULT_DATADIR = "nextcloud_aio_nextcloud_data"
 CONFIG_FILE = "/mnt/docker-aio-config/data/configuration.json"
 BACKEND = "127.0.0.1:11000"
 ADMIN_URL = "https://127.0.0.1:8080"
@@ -58,6 +63,7 @@ WANTED_KEYS = (
     "wasStartButtonClicked",
     "borg_backup_host_location",
     "borg_remote_repo",
+    "nextcloud_datadir",
     *CONTAINER_DEFAULTS,
     *OFFICE_KEYS,
 )
@@ -276,6 +282,47 @@ def cmd_backup() -> int:
     return 0 if target else 1
 
 
+def datadir_mount() -> str | None:
+    """What the Nextcloud container has at /mnt/ncdata: a host path or a volume name."""
+    proc = run("docker", "container", "inspect", NEXTCLOUD)
+    if proc is None or proc.returncode != 0:
+        return None
+    try:
+        mounts = json.loads(proc.stdout)[0].get("Mounts") or []
+    except (json.JSONDecodeError, IndexError):
+        return None
+    for m in mounts:
+        if m.get("Destination") == "/mnt/ncdata":
+            return m.get("Name") if m.get("Type") == "volume" else m.get("Source")
+    return None
+
+
+def cmd_datadir() -> int:
+    """The mount the Nextcloud container really uses vs the configured one.
+
+    Configured = $NEXTCLOUD_DATADIR when this machine sets it (the intent), else
+    what AIO saved from an earlier value, else AIO's default volume. A mismatch
+    means a change that was never migrated, or containers not recreated since.
+    """
+    have = datadir_mount()
+    if have is None:
+        print(f"cannot inspect {NEXTCLOUD} (containers not started?)")
+        return 2
+    env = os.environ.get("NEXTCLOUD_DATADIR", "")
+    cfg = read_aio() or {}
+    if env:
+        want, source = env, "$NEXTCLOUD_DATADIR"
+    elif cfg.get("nextcloud_datadir"):
+        want, source = str(cfg["nextcloud_datadir"]), "AIO's saved setting"
+    else:
+        want, source = DEFAULT_DATADIR, "AIO's default"
+    if have.rstrip("/") == want.rstrip("/"):
+        print(f"datadir: {have}")
+        return 0
+    print(f"datadir: Nextcloud uses {have}, but {source} says {want}")
+    return 1
+
+
 def cmd_checklist() -> int:
     want = load_settings()
     office = want.get("officeSuite", "")
@@ -312,6 +359,7 @@ COMMANDS = {
     "setup-done": cmd_setup_done,
     "check": cmd_check,
     "backup": cmd_backup,
+    "datadir": cmd_datadir,
     "checklist": cmd_checklist,
 }
 

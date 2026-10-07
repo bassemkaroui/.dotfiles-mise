@@ -13,7 +13,7 @@
 #   yazi       yazi + preview stack (glow, hexyl, duckdb)
 #   neovim     neovim, tree-sitter-cli, personal nvim config
 #   media      ffmpeg + imagemagick (apt)
-#   latex      XeLaTeX toolchain for the Awesome-CV resume (~1.9 GB of apt)
+#   latex      TeX Live in Docker (texlive/texlive:latest) for the Awesome-CV resume  (implies: docker)
 #   veracrypt  VeraCrypt console edition
 #   tailscale  Tailscale VPN (does NOT run `tailscale up` — join by hand)
 #   docker     Docker Engine + lazydocker + dive

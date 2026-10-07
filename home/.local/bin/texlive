@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# texlive — run a TeX Live command in the texlive/texlive:latest Docker image,
+# the one Awesome-CV's own CI builds with.
+#
+# The latex profile installs no TeX on the host. It deploys this script as
+# ~/.local/bin/texlive and again under the names of the commands it stands in
+# for (lualatex, xelatex, pdflatex, latexmk — see config.latex.toml). Called by
+# one of those names it runs that command, so `make`, latexmk and editors work
+# unchanged; called as `texlive`, its first argument is the command:
+#
+#   texlive kpsewhich fontawesome6.sty
+#
+# The enclosing git repo — or the current directory outside one — is mounted
+# at its own path, so relative paths, symlinks inside the repo (Awesome-CV's
+# examples/awesome-cv.cls) and the paths written to logs and SyncTeX all match
+# the host. A file outside that tree is invisible to the container.
+#
+# The container has no network, so a document cannot fetch or send anything,
+# even with --shell-escape. --pull never keeps a compile from starting a
+# multi-GB download; `mise run install:latex` pulls the image.
+set -euo pipefail
+
+# Keep in step with IMAGE in mise/tasks/install/latex.
+IMAGE="texlive/texlive:latest"
+
+cmd="${0##*/}"
+if [[ "$cmd" == texlive ]]; then
+    if [[ $# -eq 0 ]]; then
+        echo "usage: texlive <command> [args...]" >&2
+        exit 2
+    fi
+    cmd="$1"
+    shift
+fi
+
+if ! command -v docker &>/dev/null; then
+    echo "texlive: docker is not installed (the docker profile's install:docker provides it)" >&2
+    exit 127
+fi
+if ! image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>&1)"; then
+    echo "texlive: $image_id" >&2
+    if [[ "$image_id" == *"No such image"* ]]; then
+        echo "texlive: pull it with: mise run install:latex" >&2
+    fi
+    exit 1
+fi
+
+# LuaTeX caches two things under $TEXMFVAR, and only one may be kept:
+#
+#   names/  luaotfload's font index — ~10 s to build in a fresh container.
+#           Persisted here, per image: an index built against another image
+#           can keep resolving a font to a file that image preferred, so a new
+#           image starts a fresh directory and the others are pruned.
+#   fonts/  per-font tables. NOT reused: a run that loads them from cache maps
+#           the hyphen glyph to U+00AD SOFT HYPHEN in the PDF's text layer
+#           instead of U+2010, and extractors drop U+00AD — "Scikit-Learn"
+#           reads "ScikitLearn" to an ATS. A first run matches the CI artifact
+#           (same size, fonts and text layer), and so does every run with these
+#           tables fresh (measured 2026-10-07, TeX Live 2026). Each container
+#           gets an empty tmpfs there instead.
+#
+# Created before the mounts, or Docker would create them owned by root.
+caches="${XDG_CACHE_HOME:-$HOME/.cache}/texlive-docker"
+image_id="${image_id#sha256:}"
+cache="$caches/${image_id:0:12}"
+if [[ ! -d "$cache" ]]; then
+    mkdir -p "$cache"
+    find "$caches" -mindepth 1 -maxdepth 1 -type d ! -path "$cache" -exec rm -rf {} +
+fi
+tables="$cache/luatex-cache/generic/fonts"
+mkdir -p "$tables"
+
+work="$(pwd -P)"
+root="$(git rev-parse --show-toplevel 2>/dev/null || echo "$work")"
+
+tty=()
+if [[ -t 0 && -t 1 ]]; then
+    tty=(--tty)
+fi
+
+exec docker run --rm --interactive "${tty[@]}" \
+    --pull never \
+    --network none \
+    --user "$(id -u):$(id -g)" \
+    --env HOME=/tmp \
+    --env TEXMFVAR="$cache" \
+    --volume "$cache:$cache" \
+    --tmpfs "$tables:mode=1777" \
+    --volume "$root:$root" \
+    --workdir "$work" \
+    "$IMAGE" "$cmd" "$@"

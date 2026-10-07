@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+#MISE description="Pull the TeX Live Docker image the latex profile's wrappers run (latex profile)"
+#MISE raw=true
+#USAGE flag "--update" help="Pull a newer texlive/texlive:latest when one exists (default: report only)"
+set -eo pipefail
+
+# shellcheck disable=SC2034  # consumed by the logging helpers in lib/profile.sh
+TASK_NAME="install:latex"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib"
+# shellcheck source=../lib/profile.sh
+source "$LIB/profile.sh"
+
+# The latex profile installs no TeX on the host: ~/.local/bin/texlive and its
+# lualatex/xelatex/pdflatex/latexmk links run every command in this image, the
+# one Awesome-CV's own CI builds with, used as-is. TeX Live 2026 in it carries
+# every font the class needs (Source Sans 3, Roboto, Font Awesome 6), and a
+# build through the wrappers matches the CI artifact — same size, fonts and
+# text layer (measured 2026-10-07).
+#
+# That CI also apt-installs fonts-roboto and fonts-adobe-sourcesans3, but its
+# output is the same without them. Adding them HERE would not be: luaotfload
+# then embeds Debian's copies, and the PDF stops matching CI.
+#
+# Keep IMAGE in step with home/.local/bin/texlive.
+IMAGE="texlive/texlive:latest"
+
+require_profile latex
+
+DO_UPDATE="${usage_update:-false}"
+
+# Docker comes from the docker profile, deliberately not from this one:
+# selecting docker must not drag in TeX, so a latex machine lists both.
+have docker || skip "Docker is not installed — the latex profile needs the docker profile too (install:docker provides it)"
+if ! docker info &>/dev/null; then
+    # A fresh machine: install:docker just added us to the group, but this
+    # session's credentials predate it.
+    if id -nG "$USER" 2>/dev/null | grep -qw docker && ! id -nG | grep -qw docker; then
+        skip "This session predates your docker group membership — log out and back in, then: mise run install:latex"
+    fi
+    skip "Cannot reach the Docker daemon (sudo systemctl start docker?)"
+fi
+
+describe() {
+    local tl built
+    tl="$(docker run --rm --network none "$IMAGE" tex --version 2>/dev/null | sed -n '1s/.*(\(.*\)).*/\1/p' || true)"
+    built="$(docker image inspect --format '{{.Created}}' "$IMAGE" 2>/dev/null | cut -c1-10)"
+    printf '%s, image built %s' "${tl:-TeX Live}" "$built"
+}
+
+# Not --quiet: a first pull is several GB, and minutes of silence in the middle
+# of a bootstrap read as a hang.
+pull() {
+    docker pull "$IMAGE" >&2
+}
+
+if ! docker image inspect "$IMAGE" &>/dev/null; then
+    info "Pulling $IMAGE (several GB on a first pull)…"
+    pull || skip "Could not pull $IMAGE"
+    ok_changed "$IMAGE pulled ($(describe))"
+    exit 0
+fi
+
+# Compare digests without pulling. Offline, rate-limited or no buildx plugin:
+# REMOTE stays empty and the image is reported as present, unchecked.
+LOCAL="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null | sed 's/.*@//' || true)"
+REMOTE="$(timeout 30 docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"' || true)"
+
+if [[ -z "$REMOTE" || "$REMOTE" == "$LOCAL" ]]; then
+    ok "$IMAGE present ($(describe))"
+    if [[ -z "$REMOTE" ]]; then
+        info "(could not check the registry for a newer image)"
+    fi
+    exit 0
+fi
+
+if [[ "$DO_UPDATE" != "true" ]]; then
+    ok "$IMAGE present ($(describe)); a newer image is available"
+    info "(upgrade with: mise run install:latex --update)"
+    exit 0
+fi
+
+OLD_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+info "Pulling the newer $IMAGE…"
+pull || skip "Could not pull $IMAGE"
+ok_changed "$IMAGE updated ($(describe))"
+
+# The pull leaves the previous image untagged, holding several GB. Nothing else
+# uses it (the wrappers run --rm containers), but a compile still running from
+# it makes the removal fail — which is reported, never forced. `if`, not
+# `[[ ]] &&`: as the script's last command a false test would exit 1 and
+# abort every later member of the bootstrap chain.
+if [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE")" != "$OLD_ID" ]]; then
+    OLD_SHORT="${OLD_ID#sha256:}"
+    OLD_SHORT="${OLD_SHORT:0:12}"
+    if docker image rm "$OLD_ID" &>/dev/null; then
+        ok_changed "Removed the previous image ($OLD_SHORT)"
+    else
+        warn "Could not remove the previous image; once nothing uses it: docker image rm $OLD_SHORT"
+    fi
+fi

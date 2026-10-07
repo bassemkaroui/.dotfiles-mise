@@ -75,8 +75,9 @@ so the list is unconditional.
 | 19 | `install:brave` | Brave (`browsers`) |
 | 20 | `install:virtualbox` | Oracle's build (`virt`) + `vboxusers` |
 | 21 | `install:vagrant` | Vagrant (`virt`) |
-| 22 | `install:zen` | Zen browser tarball (`browsers`) — the largest download |
+| 22 | `install:zen` | Zen browser tarball (`browsers`) — the largest of the app downloads |
 | 23 | `install:nextcloud-aio` | Nextcloud AIO mastercontainer + `tailscale serve` (`nextcloud`), after the docker and tailscale installs it needs. Creates when absent, starts when stopped, otherwise hands off; never pulls, recreates or `--remove-orphans`. Prints the recorded first-run clicks until AIO's setup is done. With a per-machine `NEXTCLOUD_DATADIR` on a separate mount, writes a docker.service drop-in `After=<that mount>` (sudo); an empty `NEXTCLOUD_DATADIR` is unset before Compose sees it |
+| 24 | `install:latex` | the `texlive/texlive:latest` image the `latex` profile's wrappers (`~/.local/bin/texlive` and its four links) run; needs Docker from the `docker` profile. Pulls when absent — ~5.7 GB, the largest download, hence last — otherwise compares digests with the registry and only reports a newer image; `--update` pulls it and removes the superseded one. Used as-is: adding fonts to it would stop local builds matching CI (`mise_behaviours.md` 49) |
 
 `setup:repo-remotes` is safe to chain because mise identifies a clone by its `origin` URL **alone**
 (`bootstrap/repos.md`, "Safe updates only"), so an extra remote never turns a repo `conflict`; and

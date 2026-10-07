@@ -9,7 +9,8 @@ Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 
 (entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14. Re-verified against
 **2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new; 45-47 (the compose
 and secrets resources, and per-profile values, measured for the `nextcloud` profile) were added on
-2026-09-28. The repo now requires 2026.9.15 (`install.sh` refuses older).
+2026-09-28; 49 (LuaTeX's font cache, for the Docker-based `latex` profile) on 2026-10-07. The repo
+now requires 2026.9.15 (`install.sh` refuses older).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -415,6 +416,30 @@ glibc-floored. Measured floors: `0.26.11 = 2.39`, `0.25.10 = 2.34`, `0.24.7 = 2.
 
 This is why the repo declares Ubuntu 24.04+ / glibc ≥ 2.39. A 22.04 user's escape hatch is
 pinning `tree-sitter = "0.25.10"`.
+
+### 49. LuaTeX's cached font tables change the PDF's text layer
+
+Measured 2026-10-07 in `texlive/texlive:latest` (TeX Live 2026), building the Awesome-CV résumé
+with `lualatex` and a persistent `$TEXMFVAR`: the first run, on an empty cache, extracts every
+hyphen as U+2010 HYPHEN and matches the résumé's CI artifact (same size, fonts and text layer).
+Every later run loads its per-font tables from `$TEXMFVAR/luatex-cache/generic/fonts` and extracts
+U+00AD SOFT HYPHEN instead. The rendering is identical; only the text layer differs — and that is
+what an ATS or a copy-paste reads. Extractors drop U+00AD, so "Scikit-Learn" becomes "ScikitLearn".
+
+The font *index* next to it (`…/generic/names`, ~10 s to build) is safe to keep: with only the
+tables fresh, three runs in a row all matched CI. `home/.local/bin/texlive` therefore persists
+`$TEXMFVAR` per image ID and mounts an empty tmpfs over `fonts/` in each container — ~13 s a
+build, against ~4 s fully cached (wrong) or ~25 s cold.
+
+Two neighbouring facts the latex profile rests on, measured the same day:
+
+- **The stock image is the one that matches CI.** Awesome-CV's workflow also apt-installs
+  `fonts-roboto` and `fonts-adobe-sourcesans3` into it, but its artifact equals a stock build.
+  Install them in a *local* image and luaotfload embeds Debian's copies instead (70 737 bytes
+  against 55 121) — a build that no longer matches CI. So `install:latex` uses the image as-is.
+- **Ubuntu 24.04 cannot build the current class from apt at all**: its TeX Live 2023 snapshot
+  (2024-02-07) predates `fontawesome6` (CTAN, 2025-04), and no 24.04 package ships Source Sans 3
+  (`fonts-adobe-sourcesans3` starts at 25.10). That is why the profile moved to Docker.
 
 ---
 

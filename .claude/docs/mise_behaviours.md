@@ -9,8 +9,9 @@ Baseline: mise 2026.7.7 through 2026.7.13, re-verified against **2026.8.16** on 
 (entries 8, 11, 18 and 25 changed; 32-36 are new). 37 was found on 2026.9.14. Re-verified against
 **2026.9.15** on 2026-09-27: 5, 8, 11, 12, 27, 36 and 37 changed; 38-44 are new; 45-47 (the compose
 and secrets resources, and per-profile values, measured for the `nextcloud` profile) were added on
-2026-09-28; 49 (LuaTeX's font cache, for the Docker-based `latex` profile) on 2026-10-07. The repo
-now requires 2026.9.15 (`install.sh` refuses older).
+2026-09-28; 49 (LuaTeX's font cache, for the Docker-based `latex` profile) on 2026-10-07; 50
+(`activate_shims`, found from a shell-startup error) on 2026-10-09. The repo now requires
+2026.9.15 (`install.sh` refuses older).
 
 The general lesson, which has been paid for repeatedly: **`mise <cmd> --help` on the installed
 binary beats the vendored docs**, and a sandbox result beats an argument.
@@ -780,3 +781,27 @@ know:
   so its entries show as `missing` in the status that follows — that is the harness, not a bug.
 - `lint-config.py` accepts the sources because they start with `~/.dotfiles-mise/` and resolve
   inside the checkout; any other absolute path outside the repo is an `OUT-OF-REPO SOURCE` error.
+
+### 50. `mise activate` puts the shims on `PATH` (2026.9.2) — so project-only tools leak everywhere
+
+`activate_shims` first appears in `settings.toml` at v2026.9.2 and defaults to **true**: full
+activation (not just `--shims`) now adds the shims directory to `PATH`, for missing-version
+auto-install and lazy tools. Measured on 2026.9.15: `mise activate zsh` in a clean environment
+emits `export PATH='~/.local/share/mise/shims:…'`, and after the hook runs the shims sit after
+every active tool's bin directory — a fallback, but on `PATH` in every cwd.
+
+Consequence: every **installed** tool is a command everywhere, including one only a project's
+`mise.toml` pins. Outside that project its shim exits 1 with `No version is set for shim: gcloud`
+/ `Set a global default version …`, while `command -v` and zsh's `$commands` say it exists — so
+anything that probes and then runs it fails. The case that surfaced it: Powerlevel10k's gcloud
+segment (`_p9k_gcloud_prefetch`) checks `$+commands[gcloud]`, then runs `gcloud config
+configurations describe` without silencing stderr whenever its stat-cache of the active gcloud
+configuration misses — so the error showed on *some* new shells, not all.
+
+`activate_shims = false` (env `MISE_ACTIVATE_SHIMS=false`) restores the pre-9.2 shape, measured in
+a fresh `zsh -i`: no shims directory on `PATH`; `gcloud` absent from `~` (exit 127); inside the
+project, after the hook, `$commands[gcloud]` is the real `installs/gcloud/…/bin/gcloud`; core
+tools unchanged. The cost is the auto-install and lazy-tool behaviour above, which this repo
+does not use (`task.run_auto_install = false` already). `mise activate --shims` still adds them.
+`shims.exclude` is not the fix: it is a per-name list that deletes those shims outright, so every
+project-only tool installed later would leak until someone added it.

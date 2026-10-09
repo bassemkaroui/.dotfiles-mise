@@ -12,6 +12,10 @@
 
 [settings]
 activate_aggressive = true
+# 2026.9.2+ appends the shims dir to PATH under `mise activate` by default, so a
+# tool installed only for some project (gcloud) shows up everywhere as a shim
+# that errors "No version is set" — and p10k's gcloud segment calls it.
+activate_shims = false
 go_set_gobin = false
 dotfiles.root = "~/.dotfiles-mise/home"
 

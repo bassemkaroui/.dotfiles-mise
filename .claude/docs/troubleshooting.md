@@ -339,6 +339,31 @@ restarted from AIO's interface after it. Deploy, update, data-directory and remo
 
 ---
 
+## A new shell prints errors
+
+### `mise ERROR No version is set for shim: <tool>`
+
+Printed as a shell opens, on some shells but not all, and naming a tool you only use inside a
+project (`gcloud`, say). mise ≥ 2026.9.2 puts its shims directory on `PATH` under `mise activate`,
+so a tool that one project's `mise.toml` pinned and installed is a command in every directory, and
+outside that project its shim has no version to run. Whatever probes for the command and then runs
+it fails — for `gcloud` that is Powerlevel10k's gcloud segment, which re-runs `gcloud` only when
+its cache of the gcloud config goes stale, hence "some shells".
+
+`mise/config.toml` sets `activate_shims = false` to keep the shims off `PATH`
+([mise_behaviours.md](mise_behaviours.md) 50). If the error is back:
+
+```bash
+mise settings get activate_shims          # should be false
+echo "$PATH" | tr : '\n' | grep shims     # should print nothing, in a NEW shell
+```
+
+A shell opened before the setting changed keeps its old `PATH`. Don't take the message's advice
+(`mise use -g <tool>@…`): it pins a project's tool for the whole machine, and `-g` writes to
+`~/.config/mise/config.toml` — a symlink into this repo.
+
+---
+
 ## Testing gives wrong answers
 
 ### A fake-`$HOME` sandbox shows the real machine's config

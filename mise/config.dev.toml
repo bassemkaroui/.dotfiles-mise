@@ -7,7 +7,11 @@
 # mise's pipx backend uses uv when present, so uv is no longer optional.
 "npm:corepack" = "latest"
 pre-commit = "latest"
-doppler = { version = "latest", exe = "doppler" }
+# Plain "latest", no `exe`: the registry now resolves doppler to the github
+# backend, and mise ≥ 2026.10.14 FAILS the install on an option its backend
+# does not read (`option exe is not used by the github backend`). The binary is
+# found without it (measured on 2026.10.24).
+doppler = "latest"
 
 [bootstrap.packages]
 # Document converter. In `dev` rather than core because it is 190 MB installed
